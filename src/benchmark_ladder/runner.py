@@ -161,7 +161,5 @@ def aggregate_pairwise(
         "mean_unit_normalized_margin": mean(
             tuple(observation.unit_normalized_margin for observation in observations)
         ),
-        "chance_normalized_unit_accuracy": chance_normalized_accuracy(
-            normalized_accuracy, chance
-        ),
+        "chance_normalized_unit_accuracy": chance_normalized_accuracy(normalized_accuracy, chance),
     }
