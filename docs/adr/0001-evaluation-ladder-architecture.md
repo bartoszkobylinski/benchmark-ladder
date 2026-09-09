@@ -41,6 +41,21 @@ The initial capability families are provisional and expected to evolve. A useful
 
 These labels describe capability families, not fixed benchmark packages and not hard gates.
 
+### Capability taxonomy is versioned
+
+The mapping from tasks/benchmarks to capability families is a versioned artifact, not an implicit presentation rule.
+
+A taxonomy version MUST identify at least:
+
+- the capability-family definitions;
+- the task/benchmark assignments to those families;
+- any ordering or display metadata used to render a ladder/profile;
+- the rationale or changelog for reassignments.
+
+Moving a task from one family to another, splitting a family, merging families, or materially changing a family definition requires a new `taxonomy_version`.
+
+Historical capability profiles MUST retain the taxonomy version under which they were produced. A later UI MAY re-render historical task-level results under a newer taxonomy, but that is a derived reinterpretation and MUST identify the target taxonomy explicitly rather than silently rewriting the original profile.
+
 ## Capability profile before hard gating
 
 Every evaluation result SHOULD represent a capability profile rather than only a "highest level reached" value.
@@ -55,6 +70,7 @@ If a task is not executed, the result MUST distinguish that state from a measure
 - skip reason;
 - budget/calibration rule version;
 - benchmark/task version;
+- taxonomy version;
 - reference pool identifier if calibration data influenced the decision.
 
 Prefer a small sub-sampled probe over a hard skip when a low-cost probe can preserve useful evidence about non-monotone capability profiles.
@@ -103,7 +119,21 @@ A reference pool MUST NOT mean "all models observed so far" or grow implicitly a
 
 Where practical, the frozen reference-pool manifest SHOULD receive the same kind of immutable commitment/provenance treatment as other evaluation-release artifacts. Calibration results computed against different reference pools are distinct results and MUST NOT be presented as directly comparable without an explicit bridging analysis.
 
-A new architecture, tokenizer family or training regime may fall outside the calibration domain. In that case the system MUST report calibration as unavailable or out-of-domain rather than silently applying a cached region.
+### Reference-pool bootstrap
+
+A new architecture, tokenizer family or training regime may initially have no valid reference pool. That is an expected state, not an error. Early runs in such a domain MUST report calibration as `unavailable` or `out-of-domain` while still emitting ordinary task-level measurements.
+
+Promotion from uncalibrated runs to the first reference pool for a domain MUST be explicit. The applicable `calibration_rule_version` MUST predeclare, before the pool is frozen:
+
+- the calibration domain it claims to cover;
+- the minimum number of distinct model/checkpoint observations required;
+- coverage requirements across relevant variation such as training budget, model scale or architecture settings;
+- the statistical acceptance criteria for estimating floor/informative/saturation behaviour;
+- who or what process is authorized to freeze the pool.
+
+There is no repository-wide hard-coded minimum population because the required sample size depends on the calibration method and claim. A pool MUST NOT be minted until the predeclared minimum and coverage criteria of its calibration rule are satisfied.
+
+The first pool for a domain MAY be built from runs that were themselves evaluated without an operating-region classification. Its manifest MUST record that bootstrap provenance explicitly. After the pool is frozen, subsequent runs may be calibrated against it only when they fall inside the declared calibration domain.
 
 Calibration rules MUST NOT be hard-coded solely from parameter count.
 
@@ -183,6 +213,7 @@ Every evaluation result MUST record protocol provenance. At minimum, the result 
     "benchmark_id": "...",
     "benchmark_version": "...",
     "scorer_version": "...",
+    "taxonomy_version": "...",
     "runner_git_sha": "...",
     "seed": 42,
     "calibration_rule_version": "...",
@@ -199,7 +230,7 @@ The example above is schema documentation, not a real benchmark result.
 
 The schema is versioned. Changing the meaning of an existing field requires a schema version change.
 
-A published score is always identified by at least `benchmark_version` and `scorer_version`. If old private observations are re-scored under a new scorer, the new score MUST be published as a distinct result and MUST NOT silently replace the earlier published score.
+A published score is always identified by at least `benchmark_version` and `scorer_version`. A published capability profile is additionally identified by `taxonomy_version`. If old private observations are re-scored under a new scorer, the new score MUST be published as a distinct result and MUST NOT silently replace the earlier published score.
 
 ## Checkpoint-aware evaluation
 
@@ -216,6 +247,8 @@ A final checkpoint cannot be used to reconstruct historical benchmark results un
 - Continuous metrics can expose progress before discrete accuracy metrics move away from chance.
 - Private raw observations allow new scoring methods to be tested without rerunning model inference.
 - Calibration claims are tied to an explicit frozen reference population rather than an implicit global region.
+- New model domains have an explicit bootstrap path instead of silently inheriting an invalid calibration.
+- Taxonomy changes cannot silently rewrite historical capability profiles.
 - Checkpoint sweeps can reveal capability changes during training.
 
 ### Negative
@@ -225,6 +258,7 @@ A final checkpoint cannot be used to reconstruct historical benchmark results un
 - Retaining private observations increases storage, access-control and retention requirements.
 - Adaptive budget allocation is more complex than a fixed sequential benchmark list.
 - Reference-pool maintenance creates an additional versioned artifact lifecycle.
+- Capability-taxonomy maintenance creates another versioned presentation/interpretation artifact.
 
 ## Rejected alternatives
 
