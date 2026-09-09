@@ -8,7 +8,10 @@ from .schema import EvaluationMetadata
 
 
 class VersionedComponent(Protocol):
-    version: str
+    @property
+    def version(self) -> str:
+        """Stable identifier for the component behaviour used in a run."""
+        ...
 
 
 def evaluation_metadata_from_components(
