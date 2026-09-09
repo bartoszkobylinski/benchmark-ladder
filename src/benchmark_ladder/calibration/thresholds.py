@@ -20,11 +20,14 @@ class TaskState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ThresholdRule:
+    version: str
     floor_max: float
     ceiling_min: float
     min_observations: int
 
     def __post_init__(self) -> None:
+        if not self.version:
+            raise ValueError("version must be non-empty")
         if not math.isfinite(self.floor_max) or not math.isfinite(self.ceiling_min):
             raise ValueError("thresholds must be finite")
         if self.floor_max >= self.ceiling_min:
