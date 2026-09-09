@@ -5,7 +5,7 @@
 
 ## Context
 
-Evaluation code can produce plausible-looking scores while being subtly wrong. Bugs in normalization, answer indexing, batching, masking, byte accounting, aggregation or benchmark routing can silently invalidate comparisons.
+Evaluation code can produce plausible-looking scores while being subtly wrong. Bugs in normalization, answer indexing, batching, masking, byte accounting, aggregation, continuation boundaries or benchmark routing can silently invalidate comparisons.
 
 This project will publish benchmark infrastructure used to compare small language models across model sizes and training budgets. Correctness therefore requires stronger verification than ordinary application code.
 
@@ -19,11 +19,12 @@ The public test strategy consists of:
 
 1. unit tests;
 2. property-based tests;
-3. metamorphic tests;
+3. metamorphic and analytic tests;
 4. interface/contract tests;
 5. deterministic golden integration tests;
-6. mutation testing for correctness-critical pure logic;
-7. static checks and formatting/lint checks.
+6. differential validation against independent public references;
+7. mutation testing for correctness-critical logic;
+8. static checks and formatting/lint checks.
 
 ## 1. Unit tests
 
@@ -36,7 +37,8 @@ Examples include:
 - accuracy;
 - chance-normalized accuracy;
 - category aggregation;
-- floor/informative/saturation classification;
+- task-state / floor / saturation classification;
+- budget-rule decisions;
 - result schema serialization.
 
 Unit tests MUST cover boundary and degenerate cases, not only typical examples.
@@ -59,7 +61,7 @@ margin = +3
 
 ## 2. Property-based tests
 
-Property-based testing SHOULD be used for invariants that hold over broad input ranges.
+Property-based testing SHOULD be used for invariants and monotonic relationships that hold over broad input ranges.
 
 Initial properties include:
 
@@ -68,11 +70,16 @@ Initial properties include:
 - permuting answer choices together with the gold index preserves correctness;
 - serializing and deserializing a valid result preserves its semantic value;
 - adding identical offsets to all candidate log-probabilities does not change pairwise ordering or margin differences where mathematically appropriate;
-- aggregate counts equal the sum of category counts.
+- aggregate counts equal the sum of category counts;
+- increasing the gold candidate log-probability while holding competing candidates fixed MUST NOT decrease a monotone score;
+- decreasing only an incorrect candidate's log-probability MUST NOT make a previously correct pairwise decision incorrect;
+- a calibration classifier must behave monotonically around explicitly defined synthetic threshold cases where the rule is intended to be monotone.
+
+A constant scorer can satisfy many invariance properties, so invariance tests alone are insufficient.
 
 `hypothesis` is the preferred Python property-testing library unless implementation constraints require an alternative.
 
-## 3. Metamorphic tests
+## 3. Metamorphic and analytic tests
 
 Metamorphic tests MUST validate expected behaviour under controlled transformations when an exact expected output is otherwise inconvenient.
 
@@ -81,7 +88,7 @@ The test suite should include deterministic fake model adapters such as:
 - **OracleAdapter** — always assigns the preferred score to the gold answer;
 - **UniformAdapter** — assigns equal score to all choices;
 - **WrongAdapter** — systematically prefers incorrect answers;
-- **ScriptedAdapter** — returns a configured sequence of scores;
+- **ScriptedAdapter** — returns configured scores chosen so the expected aggregate is computed analytically;
 - **EchoAdapter** — useful for copy/retrieval protocol tests.
 
 These adapters allow strong end-to-end assertions without a GPU or a real model.
@@ -92,7 +99,10 @@ Expected examples:
 OracleAdapter => accuracy 1.0
 UniformAdapter => pairwise margin 0
 WrongAdapter => below-chance score where applicable
+ScriptedAdapter => analytically precomputed intermediate and aggregate values
 ```
+
+At least one non-extreme scripted fixture MUST verify a mid-range expected score exactly or within a documented tolerance. This guards against implementations that preserve endpoints while compressing or distorting the middle of the scale.
 
 ## 4. Contract tests
 
@@ -104,12 +114,31 @@ Contract tests cover, at minimum:
 - empty and minimal inputs;
 - deterministic behaviour when the adapter declares deterministic mode;
 - continuation boundary handling;
-- byte accounting;
+- byte/unit accounting;
 - batch versus single-item equivalence where supported;
 - generation length semantics;
 - error behaviour for unsupported operations.
 
-Task plugins SHOULD have an equivalent public task contract suite so hidden task implementations can be validated privately against the same interface.
+### Continuation decomposition identity
+
+For byte-oriented adapters, the following identity MUST hold within a documented numerical tolerance:
+
+```text
+sequence_logprob(context + continuation)
+==
+sequence_logprob(context)
++ continuation_logprob(context, continuation)
+```
+
+The contract suite MUST test this across empty, short, whitespace-sensitive and boundary-heavy byte sequences.
+
+Future tokenized adapters MUST define explicit continuation-boundary semantics. If tokenizer retokenization across a text boundary makes the byte-level identity inapplicable, the adapter MUST provide an equivalent differential oracle that verifies its documented conditional-likelihood semantics and MUST include tests for both aligned and boundary-sensitive cases. Silent fallback to naive token slicing is not permitted.
+
+### Task plugin contracts
+
+Hidden task implementations are correctness-critical. Every private task plugin MUST pass an equivalent task contract suite inside the trusted environment.
+
+The public repository may provide structurally safe toy implementations of that contract, but hidden examples, templates and distributions remain governed by ADR-0002.
 
 ## 5. Golden integration tests
 
@@ -122,7 +151,8 @@ fake model adapter
     -> toy task
     -> raw observations
     -> scoring
-    -> ladder classification
+    -> task-state / calibration classification
+    -> budget decision
     -> result serialization
 ```
 
@@ -132,28 +162,48 @@ A code change that alters a golden result MUST require an explicit fixture updat
 
 Floating-point values SHOULD use documented tolerances where byte-identical output is not portable. Stable structured fields SHOULD remain deterministic.
 
-## 6. Mutation testing
+Golden fixtures MUST include cases immediately below, at and immediately above any synthetic classification threshold used by the test calibration rule.
 
-Mutation testing is required for correctness-critical pure logic, especially:
+### Determinism check
+
+Public CI MUST run the deterministic golden pipeline at least twice from clean process state and compare the resulting structured outputs. Stable fields must match exactly and floating-point fields must match within their declared tolerances.
+
+## 6. Differential validation against independent public references
+
+Internal tests can agree with each other while sharing the same mistaken assumption. The project therefore SHOULD maintain at least one independent end-to-end differential check using only public material.
+
+A suitable check is to evaluate a public model on a public benchmark/task and compare the result with an established independent harness or published reference result under a matched protocol.
+
+This check is not a substitute for unit or contract tests and does not need to run on every pull request if it is expensive. It SHOULD run before releases and after changes to adapter, scoring or benchmark-routing semantics that could affect compatibility.
+
+The comparison MUST document protocol differences rather than treating approximate agreement across different prompts, normalisation rules or task versions as validation.
+
+## 7. Mutation testing
+
+Mutation testing is required for correctness-critical logic, especially:
 
 - scoring;
 - normalization;
 - aggregation;
-- ladder classification;
-- result transformations.
+- task-state/calibration classification;
+- budget decisions;
+- result transformations;
+- pure adapter boundary/offset logic that can be tested without invoking expensive model inference.
 
-Mutation testing SHOULD NOT initially cover GPU/model inference code, third-party framework glue or code whose mutants are dominated by runtime cost rather than correctness value.
+Mutation testing SHOULD NOT initially mutate GPU kernels, third-party framework internals or code whose mutants are dominated by runtime cost rather than correctness value.
 
 The initial target is:
 
 - >= 95% mutation score for core scoring/normalization modules;
-- >= 90% mutation score for ladder decision logic.
+- >= 90% mutation score for calibration/budget decision logic.
 
 These thresholds may begin as report-only while the first implementation is established, but once enforced they MUST NOT be lowered without an explicit decision and rationale.
 
+Known equivalent-mutant classes and intentionally excluded numeric-tolerance mutants MUST be documented and excluded explicitly from the denominator rather than hidden by lowering the target.
+
 `mutmut` is the preferred initial mutation runner unless practical limitations require an alternative.
 
-## 7. Static checks
+## 8. Static checks
 
 The public CI SHOULD run:
 
@@ -174,6 +224,7 @@ lint / format
     -> property tests
     -> contract tests
     -> golden integration tests
+    -> deterministic rerun/diff
 ```
 
 Mutation testing may run on protected-branch pushes and/or a scheduled workflow if its runtime makes it unsuitable for every pull request.
@@ -182,19 +233,21 @@ The CI pipeline MUST NOT require access to private benchmark data.
 
 The public repository MUST remain fully testable by an arbitrary fork.
 
+The workflow restrictions in ADR-0002, including the prohibition on exposing secrets through `pull_request_target`, chained untrusted workflows or self-hosted runners, apply to all CI definitions in this repository.
+
 ## Trusted hidden evaluation
 
 Real benchmark evaluation is not part of untrusted public PR CI.
 
-A trusted evaluation workflow may later:
+A trusted evaluation workflow may:
 
 1. start from a reviewed commit;
-2. obtain access to the private benchmark package;
-3. execute hidden tasks;
-4. retain raw observations privately;
+2. obtain access to the private evaluator/package;
+3. execute hidden tasks under the trusted boundary defined in ADR-0002;
+4. retain permitted raw observations privately;
 5. publish only allowed aggregate results.
 
-The security constraints of ADR-0002 apply regardless of CI provider.
+Private task plugins MUST run their contract tests before producing publishable hidden benchmark results.
 
 ## Determinism and provenance
 
@@ -203,6 +256,9 @@ Every evaluation run MUST record enough metadata to explain how a score was prod
 - runner commit SHA;
 - result schema version;
 - benchmark identifier and version;
+- scorer version;
+- calibration/budget rule version;
+- reference pool identifier when calibration data was used;
 - model/checkpoint identifier;
 - parameter count;
 - training token count;
@@ -210,11 +266,23 @@ Every evaluation run MUST record enough metadata to explain how a score was prod
 - random seed;
 - relevant numerical precision/runtime settings.
 
-A rerun under the same declared deterministic configuration SHOULD produce the same structured result within documented floating-point tolerances.
+A rerun under the same declared deterministic configuration MUST produce the same structured result within documented floating-point tolerances. Any component that is intentionally stochastic MUST record the source of randomness and seed/control policy.
+
+## Schema evolution tests
+
+Versioning a schema is not sufficient unless readers and migrations are tested.
+
+The test suite MUST verify, where applicable:
+
+- a reader accepts supported schema versions;
+- unsupported future versions fail explicitly rather than being silently misread;
+- migrations preserve documented semantics;
+- rescored or migrated results retain original benchmark/scorer provenance;
+- changing the meaning of a field requires a schema-version change.
 
 ## Test data policy
 
-Public test fixtures MUST be obviously synthetic or independently created for testing the harness. They MUST NOT be sampled, paraphrased or transformed from hidden benchmark material.
+Public test fixtures MUST be obviously synthetic or independently created for testing the harness. They MUST NOT be sampled, paraphrased or transformed from hidden benchmark material and MUST NOT reproduce hidden benchmark distributions or difficulty schedules closely enough to serve as matched training data.
 
 The same rule applies to examples in documentation.
 
@@ -223,23 +291,28 @@ The same rule applies to examples in documentation.
 ### Positive
 
 - Core metric errors are likely to be caught before they affect published model comparisons.
+- Adapter boundary bugs receive explicit differential verification.
 - Public contributors and forks can run the entire public verification suite without secrets or GPUs.
 - Mutation tests verify that tests assert semantics rather than merely execute code.
 - Contract tests make model and task adapters replaceable.
-- Golden fixtures make accidental scoring changes visible in review.
+- Golden fixtures make accidental scoring and calibration changes visible in review.
+- Independent public differential checks reduce the risk of an internally self-consistent but globally wrong harness.
 
 ### Negative
 
 - The test suite requires more initial engineering than a simple benchmark runner.
-- Mutation testing adds CI runtime.
+- Mutation testing and differential reference checks add runtime.
 - Determinism requirements constrain some implementation choices.
 - Hidden benchmark integration requires a second trusted test/evaluation path.
+- Future non-byte adapters require explicit continuation-boundary semantics rather than assuming byte-model behaviour generalizes.
 
 ## Rejected alternatives
 
-### Rely on benchmark smoke tests against real models
+### Rely only on benchmark smoke tests against real models
 
-Rejected because they are expensive, weakly diagnostic and may still pass when scoring logic is subtly wrong.
+Rejected because approximate smoke-test agreement is expensive, weakly diagnostic and may still pass when scoring logic is subtly wrong.
+
+This does **not** reject reproducing a known public result under a matched protocol as an independent differential oracle; that is explicitly part of the verification strategy above.
 
 ### Run private benchmark evaluation for every public pull request
 
@@ -247,4 +320,4 @@ Rejected because untrusted code must not receive access to hidden benchmark mate
 
 ### Optimize only for line coverage
 
-Rejected because high line coverage does not demonstrate that tests detect incorrect scoring behaviour. Mutation, property and metamorphic testing provide stronger evidence for correctness-critical logic.
+Rejected because high line coverage does not demonstrate that tests detect incorrect scoring behaviour. Mutation, property, metamorphic, analytic and differential testing provide stronger evidence for correctness-critical logic.
