@@ -77,9 +77,9 @@ class EvaluationMetadata:
             "reference_pool_id": self.reference_pool_id,
             "release_commitment": self.release_commitment,
         }
-        for name, value in optional.items():
-            if value is not None and not value:
-                raise ValueError(f"{name} must be non-empty when set")
+        for optional_name, optional_value in optional.items():
+            if optional_value is not None and not optional_value:
+                raise ValueError(f"{optional_name} must be non-empty when set")
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,7 +198,7 @@ class EvaluationResult:
                 raise TypeError("metric keys must be strings")
             if value is not None and not isinstance(value, (str, int, float, bool)):
                 raise TypeError(f"metric {key!r} must be a JSON scalar")
-            metrics[key] = cast(JsonScalar, value)
+            metrics[key] = value
 
         return cls(
             schema_version=schema_version,
