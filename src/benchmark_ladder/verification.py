@@ -105,11 +105,10 @@ def verify_byte_continuation_semantics(
 def verify_generation_contract(
     adapter: ModelAdapter, prompt: bytes, config: DecodingConfig
 ) -> bytes:
-    """Verify generic generation-budget semantics and return the generated continuation.
+    """Verify generic generation-budget and repeatability semantics.
 
-    This black-box check verifies budget semantics and greedy repeatability. An adapter-specific
-    conformance test must still establish that the backend wrapper returns continuation bytes
-    only rather than copying the prompt into the returned value.
+    An adapter-specific conformance test must still establish that the backend wrapper returns
+    continuation bytes only rather than copying the prompt into the returned value.
     """
 
     generated = adapter.generate(prompt, config)
@@ -125,9 +124,10 @@ def verify_generation_contract(
     if config.max_new_units == 0 and generated:
         raise ContractViolation("zero generation budget must return an empty continuation")
 
-    if config.mode is DecodingMode.GREEDY:
-        repeated = adapter.generate(prompt, config)
-        if repeated != generated:
+    repeated = adapter.generate(prompt, config)
+    if repeated != generated:
+        if config.mode is DecodingMode.GREEDY:
             raise ContractViolation("greedy generation must be repeatable for identical inputs")
+        raise ContractViolation("seeded sampling must be repeatable for identical inputs")
 
     return generated
