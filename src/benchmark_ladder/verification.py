@@ -41,8 +41,7 @@ def _assert_close(
         abs_tol=abs_tolerance,
     ):
         raise ContractViolation(
-            f"{label}: {actual} != {expected} "
-            f"within abs={abs_tolerance}, rel={rel_tolerance}"
+            f"{label}: {actual} != {expected} within abs={abs_tolerance}, rel={rel_tolerance}"
         )
 
 
@@ -83,14 +82,18 @@ def verify_byte_continuation_semantics(
             "abs_tolerance": abs_tolerance,
             "rel_tolerance": rel_tolerance,
         }
-        _assert_close(sequence_joint, oracle_joint, label=f"case {index} joint sequence", **close_args)
+        _assert_close(
+            sequence_joint, oracle_joint, label=f"case {index} joint sequence", **close_args
+        )
         _assert_close(
             sequence_context,
             oracle_context,
             label=f"case {index} context sequence",
             **close_args,
         )
-        _assert_close(conditional, oracle_conditional, label=f"case {index} conditional", **close_args)
+        _assert_close(
+            conditional, oracle_conditional, label=f"case {index} conditional", **close_args
+        )
         _assert_close(
             sequence_joint,
             sequence_context + conditional,
