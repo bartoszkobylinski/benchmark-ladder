@@ -148,6 +148,10 @@ Every development-set release MUST define a retirement trigger before it is used
 - retirement rule;
 - cumulative evaluation/query count or an equivalent exposure counter.
 
+The exposure counter is an operational proxy, not a statistical measure of adaptive-overfitting risk. One evaluation result can inform many design decisions, while repeated identical reruns may add little new adaptive information. The system MUST NOT interpret query count alone as proof that a development set remains unbiased.
+
+Where practical, the project SHOULD also record coarse optimization epochs or decision rounds that used the set, so exposure history distinguishes repeated execution from distinct design iterations without recording sensitive internal reasoning.
+
 Any published development-set result MUST identify the set version and exposure counter (or exposure bucket) so readers can discount a heavily optimized-against development set. When the retirement trigger is reached, the set MUST be rotated or explicitly reclassified as exhausted and no longer treated as an unbiased development signal.
 
 ### Adaptive-overfitting policy
@@ -183,6 +187,7 @@ Public outputs SHOULD be aggregate and versioned. A public result may contain, f
   "benchmark": "example-benchmark",
   "version": "1.0",
   "scorer_version": "1",
+  "taxonomy_version": "1",
   "score": 0.684,
   "calibration_rule_version": "1",
   "reference_pool_id": "pool-2026-09"
@@ -290,7 +295,7 @@ Once public, benchmark content must be assumed to have been copied.
 - Hidden plaintext and canonical raw observations have an explicit trusted execution owner.
 - Commitment releases bind both hidden content and score interpretation.
 - Repeated final-holdout feedback cannot silently become an unrestricted optimization oracle.
-- Development-set exposure is measurable and bounded by an explicit retirement policy.
+- Development-set exposure is bounded by an explicit retirement policy and recorded as an operational history rather than misrepresented as a statistical risk estimate.
 
 ### Negative
 
