@@ -134,9 +134,7 @@ def _parse_object(raw_line: str, *, path: Path, line_number: int) -> Mapping[str
     return cast(Mapping[str, object], parsed)
 
 
-def _required_str(
-    data: Mapping[str, object], key: str, path: Path, line_number: int
-) -> str:
+def _required_str(data: Mapping[str, object], key: str, path: Path, line_number: int) -> str:
     value = data.get(key)
     if not isinstance(value, str):
         raise TypeError(f"{path}:{line_number}: {key} must be a string")
