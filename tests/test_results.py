@@ -3,6 +3,7 @@ import json
 import pytest
 
 from benchmark_ladder.adapters import DecodingConfig, DecodingMode, GenerationUnit
+from benchmark_ladder.calibration import ThresholdRule
 from benchmark_ladder.results import (
     EvaluationMetadata,
     EvaluationResult,
@@ -11,7 +12,9 @@ from benchmark_ladder.results import (
     ModelMetadata,
     TrainingMetadata,
     UnsupportedSchemaVersion,
+    evaluation_metadata_from_components,
 )
+from benchmark_ladder.scoring import ExactMatchPolicy
 
 COMMITMENT = "sha256:" + ("a" * 64)
 
@@ -51,6 +54,28 @@ def test_result_round_trip_and_canonical_json() -> None:
     assert EvaluationResult.from_dict(payload) == result
     assert result.canonical_json() == EvaluationResult.from_dict(payload).canonical_json()
     assert json.loads(result.canonical_json())["evaluation"]["release_commitment"] == COMMITMENT
+
+
+def test_component_builder_binds_versions_to_objects() -> None:
+    scorer = ExactMatchPolicy(version="exact-v2")
+    calibration_rule = ThresholdRule(
+        version="cal-v3",
+        floor_max=0.1,
+        ceiling_min=0.9,
+        min_observations=10,
+    )
+    metadata = evaluation_metadata_from_components(
+        benchmark_id="toy",
+        benchmark_version="0-test",
+        scorer=scorer,
+        taxonomy_version="taxonomy-v1",
+        runner_git_sha="deadbeef",
+        calibration_rule=calibration_rule,
+        reference_pool_id="pool-v1",
+    )
+
+    assert metadata.scorer_version == scorer.version
+    assert metadata.calibration_rule_version == calibration_rule.version
 
 
 def test_future_schema_is_rejected() -> None:
