@@ -29,6 +29,6 @@ jobs:
       - name: Ruff lint
         run: ruff check .
       - name: Mypy
-        run: mypy src
+        run: mypy src tests
       - name: Pytest
         run: pytest
