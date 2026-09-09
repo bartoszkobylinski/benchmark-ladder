@@ -1,3 +1,5 @@
+import math
+
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -15,7 +17,9 @@ def test_accuracy_is_order_invariant(values: list[bool]) -> None:
     st.floats(min_value=-1000, max_value=1000, allow_nan=False, allow_infinity=False),
 )
 def test_pairwise_margin_is_offset_invariant(a: float, b: float, offset: float) -> None:
-    assert pairwise_margin(a + offset, b + offset) == pairwise_margin(a, b)
+    shifted = pairwise_margin(a + offset, b + offset)
+    original = pairwise_margin(a, b)
+    assert math.isclose(shifted, original, rel_tol=1e-12, abs_tol=1e-12)
 
 
 @given(
