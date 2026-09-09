@@ -17,6 +17,11 @@ class PairwiseScoringPolicy:
     normalization unit. Raw margins scale the band by the longer candidate; normalized margins
     use the per-unit value directly. Changing this value changes published scores and therefore
     requires a new ``version``.
+
+    Pairwise normalization is intentionally byte-only for now. Token and model-unit counts can
+    depend on the context/candidate boundary, while the current ``count_units`` adapter method
+    only counts standalone byte strings. Supporting those units requires a boundary-aware
+    counting contract rather than silently using the wrong divisor.
     """
 
     version: str
@@ -26,6 +31,11 @@ class PairwiseScoringPolicy:
     def __post_init__(self) -> None:
         if not self.version:
             raise ValueError("version must be non-empty")
+        if self.normalization_unit is not GenerationUnit.BYTE:
+            raise ValueError(
+                "pairwise normalization currently supports byte units only; "
+                "non-byte units require boundary-aware counting"
+            )
         if not math.isfinite(self.tie_epsilon_per_unit) or self.tie_epsilon_per_unit < 0.0:
             raise ValueError("tie_epsilon_per_unit must be finite and >= 0")
 
