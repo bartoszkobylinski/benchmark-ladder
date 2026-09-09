@@ -11,7 +11,18 @@ ADRs are written before implementation when a decision affects result comparabil
 - **Superseded** — replaced by a later ADR.
 - **Rejected** — considered and not adopted.
 
-Accepted ADRs are append-only records of the decision at the time. Material changes should normally be made in a new ADR that supersedes the old one rather than silently rewriting history.
+## Acceptance governance
+
+An ADR becomes **Accepted** only after an explicit maintainer decision. Merge alone does not implicitly accept a document marked `Proposed`.
+
+Before an ADR is relied upon by implementation work, one of the following must happen:
+
+1. its status is changed to `Accepted` in the reviewed PR before merge; or
+2. a follow-up acceptance commit changes only the status after the maintainer records the decision.
+
+A PR that intentionally merges a `Proposed` ADR for further design discussion must say so explicitly and implementation must not treat that ADR as settled policy.
+
+Accepted ADRs are append-only records of the decision at the time. Material changes should normally be made in a new ADR that supersedes the old one rather than silently rewriting history. Corrections made while an ADR is still `Proposed` remain part of the review process and may edit the document directly.
 
 ## Current ADRs
 
