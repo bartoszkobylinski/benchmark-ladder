@@ -7,7 +7,12 @@ from benchmark_ladder.verification import (
     verify_byte_continuation_semantics,
     verify_generation_contract,
 )
-from tests.helpers import BrokenOffsetAdapter, DeterministicByteAdapter, IndependentByteOracle
+from tests.helpers import (
+    BrokenOffsetAdapter,
+    ContextDroppingAdapter,
+    DeterministicByteAdapter,
+    IndependentByteOracle,
+)
 
 CASES = (
     ContinuationCase(b"", b"a"),
@@ -19,14 +24,33 @@ CASES = (
 
 def test_byte_continuation_contract_passes_with_independent_oracle() -> None:
     verify_byte_continuation_semantics(
-        DeterministicByteAdapter(), IndependentByteOracle(), CASES, tolerance=1e-12
+        DeterministicByteAdapter(),
+        IndependentByteOracle(),
+        CASES,
+        abs_tolerance=1e-12,
+        rel_tolerance=1e-12,
     )
 
 
 def test_byte_continuation_contract_catches_offset_bug() -> None:
     with pytest.raises(ContractViolation):
         verify_byte_continuation_semantics(
-            BrokenOffsetAdapter(), IndependentByteOracle(), CASES, tolerance=1e-12
+            BrokenOffsetAdapter(),
+            IndependentByteOracle(),
+            CASES,
+            abs_tolerance=1e-12,
+            rel_tolerance=1e-12,
+        )
+
+
+def test_byte_continuation_contract_catches_context_drop() -> None:
+    with pytest.raises(ContractViolation):
+        verify_byte_continuation_semantics(
+            ContextDroppingAdapter(),
+            IndependentByteOracle(),
+            CASES,
+            abs_tolerance=1e-12,
+            rel_tolerance=1e-12,
         )
 
 
@@ -36,6 +60,7 @@ def test_generation_contract_enforces_byte_budget() -> None:
         max_new_units=4,
         unit=GenerationUnit.BYTE,
         stop_policy_id="toy-stop-v1",
+        tie_break_policy_id="lowest-byte-v1",
     )
     generated = verify_generation_contract(DeterministicByteAdapter(), b"z", config)
     assert generated == b"zzzz"
@@ -46,5 +71,6 @@ def test_generation_zero_budget_is_empty() -> None:
         mode=DecodingMode.GREEDY,
         max_new_units=0,
         unit=GenerationUnit.BYTE,
+        tie_break_policy_id="lowest-byte-v1",
     )
     assert verify_generation_contract(DeterministicByteAdapter(), b"x", config) == b""
