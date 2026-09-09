@@ -102,7 +102,12 @@ WrongAdapter => below-chance score where applicable
 ScriptedAdapter => analytically precomputed intermediate and aggregate values
 ```
 
-At least one non-extreme scripted fixture MUST verify a mid-range expected score exactly or within a documented tolerance. This guards against implementations that preserve endpoints while compressing or distorting the middle of the scale.
+For every scoring transform with a non-trivial continuous or normalized scale, tests MUST pin more than the endpoints. The suite MUST either:
+
+- verify at least three analytically computed interior points spanning the useful range; or
+- verify an analytic identity for the whole mapping (for example, affine dependence on the underlying correct-count where that is the intended definition).
+
+This guards against monotone implementations that preserve 0, one midpoint and 1 while distorting the rest of the scale.
 
 ## 4. Contract tests
 
@@ -129,6 +134,14 @@ sequence_logprob(context + continuation)
 sequence_logprob(context)
 + continuation_logprob(context, continuation)
 ```
+
+This identity is valid evidence only when the two sides are computed through implementation-independent paths. `continuation_logprob` MUST NOT satisfy the contract merely by returning:
+
+```python
+sequence_logprob(context + continuation) - sequence_logprob(context)
+```
+
+The intended byte-adapter implementation path is a masked/offset conditional-likelihood calculation over the joint sequence, independently checked against whole-sequence decomposition. The contract suite MUST be able to detect or forbid a tautological subtraction implementation rather than treating it as verification.
 
 The contract suite MUST test this across empty, short, whitespace-sensitive and boundary-heavy byte sequences.
 
@@ -164,19 +177,36 @@ Floating-point values SHOULD use documented tolerances where byte-identical outp
 
 Golden fixtures MUST include cases immediately below, at and immediately above any synthetic classification threshold used by the test calibration rule.
 
-### Determinism check
+### Determinism and execution-invariance check
 
-Public CI MUST run the deterministic golden pipeline at least twice from clean process state and compare the resulting structured outputs. Stable fields must match exactly and floating-point fields must match within their declared tolerances.
+Public CI MUST run the deterministic golden pipeline from clean process state more than once and compare the resulting structured outputs.
+
+At least one rerun MUST intentionally vary a factor that the declared semantics say should not change the result. Initial public-CI perturbations SHOULD include one or more of:
+
+- single-item versus batched execution;
+- different worker/thread counts such as `OMP_NUM_THREADS=1` versus `4` where the code path supports it;
+- different deterministic chunking/accumulation boundaries.
+
+Stable fields must match exactly and floating-point fields must match within declared tolerances. If a runtime or backend is known to make a given perturbation numerically non-equivalent, that limitation must be explicit and the relevant invariant must not be claimed.
 
 ## 6. Differential validation against independent public references
 
-Internal tests can agree with each other while sharing the same mistaken assumption. The project therefore SHOULD maintain at least one independent end-to-end differential check using only public material.
+Internal tests can agree with each other while sharing the same mistaken assumption. The project therefore MUST establish at least one independent end-to-end differential check using only public material before the first release that claims harness correctness.
 
-A suitable check is to evaluate a public model on a public benchmark/task and compare the result with an established independent harness or published reference result under a matched protocol.
+The initial intended reference is the EleutherAI `lm-evaluation-harness`, using a public model and public task under a deliberately matched protocol. A concrete first target SHOULD use a small public causal LM such as `EleutherAI/pythia-70m` and a frozen public task slice whose scoring semantics can be reproduced on both sides.
+
+A differential check has to be falsifiable. Its fixture/specification MUST record:
+
+- reference harness version/commit;
+- public model identifier and revision;
+- public task identifier/version and exact frozen item slice;
+- prompt/context construction;
+- normalization and answer-scoring semantics;
+- numerical tolerance and aggregate pass/fail criterion.
+
+For deterministic log-probability comparisons under an intentionally identical protocol, the initial acceptance target SHOULD require per-example scores to agree within a documented tight tolerance (provisionally `1e-5` absolute unless backend precision requires a justified alternative) and discrete decisions/aggregate counts to agree exactly. If the protocols cannot be made identical, the comparison MUST be labeled diagnostic rather than passing/failing compatibility validation.
 
 This check is not a substitute for unit or contract tests and does not need to run on every pull request if it is expensive. It SHOULD run before releases and after changes to adapter, scoring or benchmark-routing semantics that could affect compatibility.
-
-The comparison MUST document protocol differences rather than treating approximate agreement across different prompts, normalisation rules or task versions as validation.
 
 ## 7. Mutation testing
 
@@ -224,7 +254,7 @@ lint / format
     -> property tests
     -> contract tests
     -> golden integration tests
-    -> deterministic rerun/diff
+    -> execution-invariance rerun/diff
 ```
 
 Mutation testing may run on protected-branch pushes and/or a scheduled workflow if its runtime makes it unsuitable for every pull request.
@@ -291,12 +321,13 @@ The same rule applies to examples in documentation.
 ### Positive
 
 - Core metric errors are likely to be caught before they affect published model comparisons.
-- Adapter boundary bugs receive explicit differential verification.
+- Adapter boundary bugs receive explicit non-tautological differential verification.
 - Public contributors and forks can run the entire public verification suite without secrets or GPUs.
 - Mutation tests verify that tests assert semantics rather than merely execute code.
 - Contract tests make model and task adapters replaceable.
 - Golden fixtures make accidental scoring and calibration changes visible in review.
 - Independent public differential checks reduce the risk of an internally self-consistent but globally wrong harness.
+- Execution-invariance reruns test more than repeated execution under one identical runtime configuration.
 
 ### Negative
 
@@ -305,6 +336,7 @@ The same rule applies to examples in documentation.
 - Determinism requirements constrain some implementation choices.
 - Hidden benchmark integration requires a second trusted test/evaluation path.
 - Future non-byte adapters require explicit continuation-boundary semantics rather than assuming byte-model behaviour generalizes.
+- Differential compatibility checks require maintaining a frozen external reference specification.
 
 ## Rejected alternatives
 
