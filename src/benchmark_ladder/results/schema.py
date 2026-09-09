@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -13,6 +14,7 @@ from benchmark_ladder.adapters import DecodingConfig, DecodingMode, GenerationUn
 
 SCHEMA_VERSION = 1
 JsonScalar: TypeAlias = str | int | float | bool | None
+_RELEASE_COMMITMENT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class UnsupportedSchemaVersion(ValueError):
@@ -56,7 +58,7 @@ class EvaluationMetadata:
     scorer_version: str
     taxonomy_version: str
     runner_git_sha: str
-    seed: int
+    seed: int | None = None
     calibration_rule_version: str | None = None
     reference_pool_id: str | None = None
     release_commitment: str | None = None
@@ -75,24 +77,36 @@ class EvaluationMetadata:
         optional = {
             "calibration_rule_version": self.calibration_rule_version,
             "reference_pool_id": self.reference_pool_id,
-            "release_commitment": self.release_commitment,
         }
         for optional_name, optional_value in optional.items():
             if optional_value is not None and not optional_value:
                 raise ValueError(f"{optional_name} must be non-empty when set")
+        if self.release_commitment is not None and not _RELEASE_COMMITMENT_RE.fullmatch(
+            self.release_commitment
+        ):
+            raise ValueError("release_commitment must be sha256:<64 lowercase hex characters>")
 
 
 @dataclass(frozen=True, slots=True)
 class ExecutionMetadata:
     status: ExecutionStatus
     skip_reason: str | None = None
+    skip_rule_version: str | None = None
     decoding: DecodingConfig | None = None
 
     def __post_init__(self) -> None:
-        if self.status is ExecutionStatus.SKIPPED and not self.skip_reason:
-            raise ValueError("skipped execution requires skip_reason")
-        if self.status is ExecutionStatus.MEASURED and self.skip_reason is not None:
-            raise ValueError("measured execution must not carry skip_reason")
+        if self.status is ExecutionStatus.SKIPPED:
+            if not self.skip_reason:
+                raise ValueError("skipped execution requires skip_reason")
+            if not self.skip_rule_version:
+                raise ValueError("skipped execution requires skip_rule_version")
+            if self.decoding is not None:
+                raise ValueError("skipped execution must not carry decoding provenance")
+        else:
+            if self.skip_reason is not None:
+                raise ValueError("measured execution must not carry skip_reason")
+            if self.skip_rule_version is not None:
+                raise ValueError("measured execution must not carry skip_rule_version")
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +121,8 @@ class EvaluationResult:
     def __post_init__(self) -> None:
         if self.schema_version != SCHEMA_VERSION:
             raise UnsupportedSchemaVersion(f"unsupported schema_version: {self.schema_version}")
+        if self.execution.status is ExecutionStatus.SKIPPED and self.metrics:
+            raise ValueError("skipped execution must not carry measured metrics")
         for key, value in self.metrics.items():
             if not key:
                 raise ValueError("metric names must be non-empty")
@@ -125,6 +141,7 @@ class EvaluationResult:
                 "top_k": decoding.top_k,
                 "top_p": decoding.top_p,
                 "stop_policy_id": decoding.stop_policy_id,
+                "tie_break_policy_id": decoding.tie_break_policy_id,
                 "seed": decoding.seed,
             }
 
@@ -153,6 +170,7 @@ class EvaluationResult:
             "execution": {
                 "status": self.execution.status.value,
                 "skip_reason": self.execution.skip_reason,
+                "skip_rule_version": self.execution.skip_rule_version,
                 "decoding": decoding_data,
             },
             "metrics": dict(self.metrics),
@@ -189,6 +207,7 @@ class EvaluationResult:
                 top_k=_optional_int(decoding_data, "top_k"),
                 top_p=_optional_float(decoding_data, "top_p"),
                 stop_policy_id=_optional_str(decoding_data, "stop_policy_id"),
+                tie_break_policy_id=_optional_str(decoding_data, "tie_break_policy_id"),
                 seed=_optional_int(decoding_data, "seed"),
             )
 
@@ -217,7 +236,7 @@ class EvaluationResult:
                 scorer_version=_required_str(evaluation_data, "scorer_version"),
                 taxonomy_version=_required_str(evaluation_data, "taxonomy_version"),
                 runner_git_sha=_required_str(evaluation_data, "runner_git_sha"),
-                seed=_required_int(evaluation_data, "seed"),
+                seed=_optional_int(evaluation_data, "seed"),
                 calibration_rule_version=_optional_str(evaluation_data, "calibration_rule_version"),
                 reference_pool_id=_optional_str(evaluation_data, "reference_pool_id"),
                 release_commitment=_optional_str(evaluation_data, "release_commitment"),
@@ -225,6 +244,7 @@ class EvaluationResult:
             execution=ExecutionMetadata(
                 status=ExecutionStatus(_required_str(execution_data, "status")),
                 skip_reason=_optional_str(execution_data, "skip_reason"),
+                skip_rule_version=_optional_str(execution_data, "skip_rule_version"),
                 decoding=decoding,
             ),
             metrics=metrics,
