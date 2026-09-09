@@ -1,4 +1,5 @@
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 from benchmark_ladder.scoring import accuracy, chance_normalized_accuracy, pairwise_margin
 

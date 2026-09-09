@@ -2,13 +2,12 @@ import pytest
 
 from benchmark_ladder.adapters import DecodingConfig, DecodingMode, GenerationUnit
 from benchmark_ladder.verification import (
-    ContractViolation,
     ContinuationCase,
+    ContractViolation,
     verify_byte_continuation_semantics,
     verify_generation_contract,
 )
 from tests.helpers import BrokenOffsetAdapter, DeterministicByteAdapter, IndependentByteOracle
-
 
 CASES = (
     ContinuationCase(b"", b"a"),
