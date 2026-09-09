@@ -22,6 +22,17 @@ CASES = (
 )
 
 
+class SeedIgnoringSampler(DeterministicByteAdapter):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, prompt: bytes, config: DecodingConfig) -> bytes:
+        del prompt
+        self.calls += 1
+        value = 65 + (self.calls % 3)
+        return bytes([value]) * config.max_new_units
+
+
 def test_byte_continuation_contract_passes_with_independent_oracle() -> None:
     verify_byte_continuation_semantics(
         DeterministicByteAdapter(),
@@ -74,3 +85,15 @@ def test_generation_zero_budget_is_empty() -> None:
         tie_break_policy_id="lowest-byte-v1",
     )
     assert verify_generation_contract(DeterministicByteAdapter(), b"x", config) == b""
+
+
+def test_sampling_with_same_seed_must_repeat() -> None:
+    config = DecodingConfig(
+        mode=DecodingMode.SAMPLE,
+        max_new_units=3,
+        unit=GenerationUnit.BYTE,
+        temperature=0.8,
+        seed=123,
+    )
+    with pytest.raises(ContractViolation, match="seeded sampling"):
+        verify_generation_contract(SeedIgnoringSampler(), b"x", config)
