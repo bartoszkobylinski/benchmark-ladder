@@ -13,8 +13,13 @@ class ExactMatchPolicy:
     tested. Keeping these transforms explicit prevents accidental whitespace/case behaviour.
     """
 
+    version: str
     strip_outer_ascii_whitespace: bool = False
     ascii_case_insensitive: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.version:
+            raise ValueError("version must be non-empty")
 
 
 def normalize_output(data: bytes, policy: ExactMatchPolicy) -> bytes:
