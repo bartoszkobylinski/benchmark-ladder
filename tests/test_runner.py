@@ -103,3 +103,12 @@ def test_pairwise_policy_rejects_negative_tie_band() -> None:
             normalization_unit=GenerationUnit.BYTE,
             tie_epsilon_per_unit=-1.0,
         )
+
+
+def test_pairwise_policy_rejects_non_byte_normalization() -> None:
+    with pytest.raises(ValueError, match="boundary-aware counting"):
+        PairwiseScoringPolicy(
+            version="token-not-supported-yet",
+            normalization_unit=GenerationUnit.TOKEN,
+            tie_epsilon_per_unit=1e-12,
+        )
