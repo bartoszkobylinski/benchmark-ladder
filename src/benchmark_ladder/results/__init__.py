@@ -1,3 +1,4 @@
+from .builders import VersionedComponent, evaluation_metadata_from_components
 from .schema import (
     SCHEMA_VERSION,
     EvaluationMetadata,
@@ -18,4 +19,6 @@ __all__ = [
     "ModelMetadata",
     "TrainingMetadata",
     "UnsupportedSchemaVersion",
+    "VersionedComponent",
+    "evaluation_metadata_from_components",
 ]
