@@ -58,35 +58,42 @@ Ignored files can still be force-added, copied into artifacts, exposed in logs, 
 
 Therefore, the canonical hidden benchmark corpus MUST be maintained in a separate private repository or access-controlled store. Local ignored paths exist only to reduce the chance of an accidental add during development.
 
-## Trusted evaluator owns hidden plaintext
+## Trusted evaluator owns hidden plaintext and observations
 
 Hidden items MUST be materialized only inside the trusted evaluation boundary.
 
-The preferred architecture is that a private evaluator process owns:
+The private evaluator process owns:
 
 - benchmark item loading;
 - hidden task construction;
 - answer keys;
 - hidden scorer configuration;
-- private per-example observations;
-- release-local item identifiers.
+- release-local item identifiers;
+- private per-example observations in memory;
+- writes to the private observation store.
 
-The public harness may orchestrate the evaluation and expose adapter contracts, but it MUST NOT require hidden benchmark plaintext to pass through public CI, public logs or untrusted extension code.
+The public harness may orchestrate job submission and expose adapter contracts, but it MUST NOT own the hidden observation store and MUST NOT require hidden benchmark plaintext or raw private observations to pass through public CI, public logs or untrusted extension code.
 
-Where practical, the private evaluator should communicate with model inference through a narrow evaluator-owned interface and return only private observations or allowed aggregates.
+Where practical, the private evaluator communicates with model inference through a narrow evaluator-owned interface. Only disclosure-approved aggregates or status metadata cross from the trusted evaluator into the public reporting path.
 
-### Submitted model code is not automatically trusted
+## Submitted model execution is sandboxed by default
 
 A hidden item eventually has to be scored by a model. If user-supplied executable code can inspect the item, that code can also log or exfiltrate it.
 
-Therefore:
+For Fabryka-style custom model submissions, arbitrary model code must be treated as the normal case rather than an exceptional fallback. Therefore the standard hidden-evaluation runtime for submitted executable code MUST be an isolated sandbox with at least:
 
-- evaluator-owned model implementations SHOULD load submitted weights when the model format permits this;
-- arbitrary user-supplied executable code MUST NOT receive hidden benchmark plaintext together with unrestricted network or persistent-storage access;
-- if arbitrary model code must be executed, it MUST run in an isolated environment with no network egress, no benchmark credentials, constrained filesystem access and ephemeral state;
-- the trust decision for a model runtime MUST be explicit and auditable.
+- no network egress;
+- no benchmark or storage credentials;
+- ephemeral writable state;
+- constrained filesystem access;
+- no access to unrelated benchmark releases or observation stores;
+- explicit resource limits and auditable runtime configuration.
 
-This requirement applies independently of whether the surrounding harness is public or private.
+Evaluator-owned model implementations MAY load submitted weights directly instead of executing submitter code where a supported format makes that possible. This is an optimisation that reduces the attack surface; it is not the assumed default.
+
+The trust decision for every model runtime MUST be explicit and auditable.
+
+A no-egress sandbox does not eliminate all side channels. Timing, memory pressure and other resource-usage signals may still leak limited information if the submitter can observe them. These channels are an accepted residual risk unless later threat modelling shows they are material enough to require stronger isolation or response obfuscation.
 
 ## Private benchmark package
 
@@ -129,6 +136,19 @@ The final holdout MUST NOT be used for:
 - early stopping;
 - repeated interactive debugging;
 - tuning benchmark-specific heuristics.
+
+### Development-set lifetime
+
+A development hidden set MUST NOT remain an unbounded permanent optimization target.
+
+Every development-set release MUST define a retirement trigger before it is used. The trigger may be calendar-based, cumulative-query based, or both. At minimum the project MUST record:
+
+- development-set version;
+- activation date;
+- retirement rule;
+- cumulative evaluation/query count or an equivalent exposure counter.
+
+Any published development-set result MUST identify the set version and exposure counter (or exposure bucket) so readers can discount a heavily optimized-against development set. When the retirement trigger is reached, the set MUST be rotated or explicitly reclassified as exhausted and no longer treated as an unbiased development signal.
 
 ### Adaptive-overfitting policy
 
@@ -198,6 +218,26 @@ The salt remains private while the benchmark is active and is released only when
 
 The canonicalization procedure used to compute the commitment MUST itself be versioned and documented.
 
+### Commitment verification semantics
+
+A salted commitment provides evidence that can be redeemed later; by itself it does not provide live third-party verification while both the salt and canonical manifest remain secret.
+
+For an ordinary active hidden release, external verification therefore occurs at retirement, audit or controlled disclosure when enough material is revealed to recompute the commitment. If live verification is required, the project MUST add an explicit mechanism such as third-party escrow of the canonical manifest or a selectively revealable commitment structure such as a Merkle tree. This ADR does not require live verification for the initial implementation.
+
+### Commitment custody
+
+Salts and canonical commitment manifests are integrity-critical secrets. Losing them can make a historical commitment permanently unverifiable even if no benchmark content was compromised.
+
+The private evaluation system MUST define custody for commitment material covering:
+
+- access control;
+- encrypted backup or equivalent durable recovery;
+- separation from ordinary public artifacts;
+- recovery/escrow procedure;
+- rotation or invalidation procedure if custody is compromised.
+
+Where practical, at least one recovery copy of salt/manifest material SHOULD be stored independently of the primary benchmark store so a single storage failure cannot destroy both the active benchmark and its integrity evidence.
+
 ### Time anchoring
 
 A commitment stored only in a mutable repository does not independently prove when it existed.
@@ -211,6 +251,8 @@ A later reveal SHOULD provide enough material to verify both the commitment and 
 Private observations are sensitive research data, not ordinary debug output.
 
 They MUST use release-local random item identifiers rather than content hashes or stable cross-version identifiers. Item identifiers MUST NOT provide a verification oracle for guessed benchmark content or reveal which items survived a rotation.
+
+The private evaluator is the sole owner/writer of canonical per-example observation records. Downstream public reporting consumes only disclosure-approved aggregates or derived status metadata. Any internal analysis service that reads raw observations is part of the trusted boundary and inherits the same access and logging restrictions.
 
 The private observation store MUST have a documented policy covering:
 
@@ -245,17 +287,21 @@ Once public, benchmark content must be assumed to have been copied.
 
 - Public development can proceed without making hidden evaluation data trainable from the repository.
 - Public CI remains fork-safe and requires no benchmark secrets.
-- Hidden plaintext has an explicit trusted execution boundary.
+- Hidden plaintext and canonical raw observations have an explicit trusted execution owner.
 - Commitment releases bind both hidden content and score interpretation.
 - Repeated final-holdout feedback cannot silently become an unrestricted optimization oracle.
+- Development-set exposure is measurable and bounded by an explicit retirement policy.
 
 ### Negative
 
 - Contributors cannot reproduce the full hidden evaluation from the public repository alone.
 - A second private storage location and access policy must be maintained.
 - Debugging hidden tasks requires a trusted environment.
-- Secure execution of arbitrary submitted model code may require sandboxing or a constrained evaluator-owned model format.
+- Secure execution of arbitrary submitted model code requires sandboxing as the normal path unless evaluator-owned weight loading is supported.
 - Final-holdout access requires governance in addition to technical secrecy.
+- Salt/manifest custody creates another integrity-critical secret lifecycle.
+- A salted commitment is normally verifiable only later unless an additional live-verification mechanism is deployed.
+- Sandboxing reduces but does not eliminate timing/resource side channels.
 
 ## Rejected alternatives
 
