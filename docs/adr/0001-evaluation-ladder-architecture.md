@@ -87,7 +87,21 @@ benchmark@version
 + reference_pool_id
 ```
 
-The `reference_pool_id` identifies the versioned population of models/checkpoints used to estimate floor, discrimination and saturation behaviour. A result that reports an operating-region classification MUST record this identifier.
+The `reference_pool_id` identifies the frozen population of models/checkpoints used to estimate floor, discrimination and saturation behaviour. A result that reports an operating-region classification MUST record this identifier.
+
+### Reference-pool lifecycle
+
+A reference pool MUST be an immutable, explicitly created and versioned calibration artifact. It MUST identify at least:
+
+- the model/checkpoint identifiers included in the pool;
+- the benchmark and benchmark version evaluated for those checkpoints;
+- the scorer version used for the reference observations;
+- the calibration rule version for which the pool is intended;
+- enough provenance to reproduce which observations belong to the pool.
+
+A reference pool MUST NOT mean "all models observed so far" or grow implicitly as new runs arrive. Once a pool is frozen, adding, removing or replacing a model/checkpoint requires a new `reference_pool_id`.
+
+Where practical, the frozen reference-pool manifest SHOULD receive the same kind of immutable commitment/provenance treatment as other evaluation-release artifacts. Calibration results computed against different reference pools are distinct results and MUST NOT be presented as directly comparable without an explicit bridging analysis.
 
 A new architecture, tokenizer family or training regime may fall outside the calibration domain. In that case the system MUST report calibration as unavailable or out-of-domain rather than silently applying a cached region.
 
@@ -201,7 +215,7 @@ A final checkpoint cannot be used to reconstruct historical benchmark results un
 - Non-monotone, spiky capability profiles remain observable.
 - Continuous metrics can expose progress before discrete accuracy metrics move away from chance.
 - Private raw observations allow new scoring methods to be tested without rerunning model inference.
-- Calibration claims are tied to an explicit reference population rather than an implicit global region.
+- Calibration claims are tied to an explicit frozen reference population rather than an implicit global region.
 - Checkpoint sweeps can reveal capability changes during training.
 
 ### Negative
@@ -210,6 +224,7 @@ A final checkpoint cannot be used to reconstruct historical benchmark results un
 - Results carry more provenance fields and explicit missingness states.
 - Retaining private observations increases storage, access-control and retention requirements.
 - Adaptive budget allocation is more complex than a fixed sequential benchmark list.
+- Reference-pool maintenance creates an additional versioned artifact lifecycle.
 
 ## Rejected alternatives
 
