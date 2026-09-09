@@ -218,9 +218,7 @@ class EvaluationResult:
                 taxonomy_version=_required_str(evaluation_data, "taxonomy_version"),
                 runner_git_sha=_required_str(evaluation_data, "runner_git_sha"),
                 seed=_required_int(evaluation_data, "seed"),
-                calibration_rule_version=_optional_str(
-                    evaluation_data, "calibration_rule_version"
-                ),
+                calibration_rule_version=_optional_str(evaluation_data, "calibration_rule_version"),
                 reference_pool_id=_optional_str(evaluation_data, "reference_pool_id"),
                 release_commitment=_optional_str(evaluation_data, "release_commitment"),
             ),

@@ -48,7 +48,9 @@ class DecodingConfig:
             raise ValueError("stop_policy_id must be non-empty when set")
 
         if self.mode is DecodingMode.GREEDY:
-            if any(value is not None for value in (self.temperature, self.top_k, self.top_p, self.seed)):
+            if any(
+                value is not None for value in (self.temperature, self.top_k, self.top_p, self.seed)
+            ):
                 raise ValueError("greedy decoding must not carry sampling parameters")
         else:
             if self.temperature is None or self.temperature <= 0.0:

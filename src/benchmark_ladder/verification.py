@@ -5,7 +5,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from benchmark_ladder.adapters import DecodingConfig, GenerationUnit, ModelAdapter, PositionwiseOracle
+from benchmark_ladder.adapters import (
+    DecodingConfig,
+    GenerationUnit,
+    ModelAdapter,
+    PositionwiseOracle,
+)
 
 
 class ContractViolation(AssertionError):
