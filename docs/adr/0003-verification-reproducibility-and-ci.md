@@ -111,7 +111,7 @@ This guards against monotone implementations that preserve 0, one midpoint and 1
 
 ## 4. Contract tests
 
-Every model adapter implementation MUST pass the same adapter contract suite.
+Every model adapter implementation MUST pass the same public adapter contract suite plus any adapter-specific conformance checks required by its numerical backend.
 
 Contract tests cover, at minimum:
 
@@ -124,9 +124,9 @@ Contract tests cover, at minimum:
 - generation length semantics;
 - error behaviour for unsupported operations.
 
-### Continuation decomposition identity
+### Continuation semantics for byte-oriented adapters
 
-For byte-oriented adapters, the following identity MUST hold within a documented numerical tolerance:
+For byte-oriented adapters, the following identity is a required invariant:
 
 ```text
 sequence_logprob(context + continuation)
@@ -135,17 +135,23 @@ sequence_logprob(context)
 + continuation_logprob(context, continuation)
 ```
 
-This identity is valid evidence only when the two sides are computed through implementation-independent paths. `continuation_logprob` MUST NOT satisfy the contract merely by returning:
+The identity is necessary but not sufficient. A black-box identity test cannot distinguish a genuine conditional-likelihood implementation from an implementation that simply subtracts two whole-sequence scores.
 
-```python
-sequence_logprob(context + continuation) - sequence_logprob(context)
-```
+Therefore adapter verification MUST include an **independent position-wise oracle** for continuation semantics. For at least one tiny deterministic reference model or adapter-specific reference fixture, the test must compute expected continuation log-probability directly from the model's position-level logits/scores by summing the target-byte log-probabilities over explicitly enumerated continuation positions.
 
-The intended byte-adapter implementation path is a masked/offset conditional-likelihood calculation over the joint sequence, independently checked against whole-sequence decomposition. The contract suite MUST be able to detect or forbid a tautological subtraction implementation rather than treating it as verification.
+The reference oracle:
 
-The contract suite MUST test this across empty, short, whitespace-sensitive and boundary-heavy byte sequences.
+- MUST NOT call `sequence_logprob`;
+- MUST NOT call `continuation_logprob`;
+- MUST independently define which model output position predicts each continuation byte;
+- MUST include empty, short, whitespace-sensitive and boundary-heavy cases;
+- MUST compare the production adapter result against the independently accumulated expected value within a documented tolerance.
 
-Future tokenized adapters MUST define explicit continuation-boundary semantics. If tokenizer retokenization across a text boundary makes the byte-level identity inapplicable, the adapter MUST provide an equivalent differential oracle that verifies its documented conditional-likelihood semantics and MUST include tests for both aligned and boundary-sensitive cases. Silent fallback to naive token slicing is not permitted.
+If a backend cannot expose sufficient position-level scores for such a conformance test, it MUST provide an equivalent adapter-specific white-box oracle that is independent of the production aggregation path. An adapter without an independent semantic oracle MUST NOT be described as having verified continuation-boundary semantics.
+
+A long-context/short-continuation precision stress case SHOULD additionally be included to expose cancellation or accumulation problems. Its tolerance MUST be derived from the adapter's declared numerical precision and backend rather than used as the sole proof of implementation independence.
+
+Future tokenized adapters MUST define explicit continuation-boundary semantics. If tokenizer retokenization across a text boundary makes the byte-level identity inapplicable, the adapter MUST provide an equivalent independent differential oracle and MUST include tests for both aligned and boundary-sensitive cases. Silent fallback to naive token slicing is not permitted.
 
 ### Task plugin contracts
 
@@ -181,19 +187,25 @@ Golden fixtures MUST include cases immediately below, at and immediately above a
 
 Public CI MUST run the deterministic golden pipeline from clean process state more than once and compare the resulting structured outputs.
 
-At least one rerun MUST intentionally vary a factor that the declared semantics say should not change the result. Initial public-CI perturbations SHOULD include one or more of:
+At least one perturbation is unconditional: the same deterministic observation sequence MUST be aggregated/serialized using at least two different chunk boundaries (for example chunk size 1 and a non-trivial larger chunk size), and the result MUST remain semantically identical.
+
+Where supported, adapter-specific reruns SHOULD additionally vary factors that the declared semantics say should not change the result, including:
 
 - single-item versus batched execution;
-- different worker/thread counts such as `OMP_NUM_THREADS=1` versus `4` where the code path supports it;
-- different deterministic chunking/accumulation boundaries.
+- different worker/thread counts such as `OMP_NUM_THREADS=1` versus `4`;
+- alternative deterministic batching boundaries.
 
 Stable fields must match exactly and floating-point fields must match within declared tolerances. If a runtime or backend is known to make a given perturbation numerically non-equivalent, that limitation must be explicit and the relevant invariant must not be claimed.
 
+Public GitHub-hosted CI establishes these execution invariants for the public CPU test path. It does not by itself prove GPU-kernel determinism. Any publishable trusted GPU evaluation path MUST separately record deterministic-kernel/precision settings and SHOULD run a release-level repeatability check on the actual backend used for scoring.
+
 ## 6. Differential validation against independent public references
 
-Internal tests can agree with each other while sharing the same mistaken assumption. The project therefore MUST establish at least one independent end-to-end differential check using only public material before the first release that claims harness correctness.
+Internal tests can agree with each other while sharing the same mistaken assumption. The project therefore MUST establish at least one independent end-to-end differential check using only public material before any benchmark result produced by the harness is designated publishable.
 
-The initial intended reference is the EleutherAI `lm-evaluation-harness`, using a public model and public task under a deliberately matched protocol. A concrete first target SHOULD use a small public causal LM such as `EleutherAI/pythia-70m` and a frozen public task slice whose scoring semantics can be reproduced on both sides.
+The initial intended external reference is the EleutherAI `lm-evaluation-harness`, using a frozen public model/task specification under a deliberately matched protocol. A small public causal LM such as `EleutherAI/pythia-70m` is a useful first reference for validating shared scoring, normalization, choice handling and aggregation semantics.
+
+That reference does **not** validate the project's byte-oriented continuation boundary by itself because it exercises a tokenized Hugging Face model path. Byte-adapter boundary correctness is established separately by the independent position-wise oracle required in Section 4. A future public byte-level reference model may be added as an additional external differential target.
 
 A differential check has to be falsifiable. Its fixture/specification MUST record:
 
@@ -202,9 +214,12 @@ A differential check has to be falsifiable. Its fixture/specification MUST recor
 - public task identifier/version and exact frozen item slice;
 - prompt/context construction;
 - normalization and answer-scoring semantics;
+- backend precision/determinism settings;
 - numerical tolerance and aggregate pass/fail criterion.
 
-For deterministic log-probability comparisons under an intentionally identical protocol, the initial acceptance target SHOULD require per-example scores to agree within a documented tight tolerance (provisionally `1e-5` absolute unless backend precision requires a justified alternative) and discrete decisions/aggregate counts to agree exactly. If the protocols cannot be made identical, the comparison MUST be labeled diagnostic rather than passing/failing compatibility validation.
+For the initial reference, exact agreement of deterministic discrete decisions and aggregate counts is the primary pass/fail criterion when the protocol is matched exactly. Continuous score tolerances MUST be established on a frozen deterministic baseline before the compatibility gate is activated, using the actual backend precision and repeatability observed on both sides. The tolerance is then versioned with the fixture and MUST NOT be loosened later without an explicit rationale and fixture-version change.
+
+Where applicable, TF32 and other backend features that materially change numerical semantics SHOULD be disabled for the differential reference run, and deterministic kernels SHOULD be requested. If the protocols cannot be made identical, the comparison MUST be labeled diagnostic rather than passing/failing compatibility validation.
 
 This check is not a substitute for unit or contract tests and does not need to run on every pull request if it is expensive. It SHOULD run before releases and after changes to adapter, scoring or benchmark-routing semantics that could affect compatibility.
 
@@ -287,6 +302,7 @@ Every evaluation run MUST record enough metadata to explain how a score was prod
 - result schema version;
 - benchmark identifier and version;
 - scorer version;
+- taxonomy version;
 - calibration/budget rule version;
 - reference pool identifier when calibration data was used;
 - model/checkpoint identifier;
@@ -307,7 +323,7 @@ The test suite MUST verify, where applicable:
 - a reader accepts supported schema versions;
 - unsupported future versions fail explicitly rather than being silently misread;
 - migrations preserve documented semantics;
-- rescored or migrated results retain original benchmark/scorer provenance;
+- rescored or migrated results retain original benchmark/scorer/taxonomy provenance;
 - changing the meaning of a field requires a schema-version change.
 
 ## Test data policy
@@ -321,12 +337,12 @@ The same rule applies to examples in documentation.
 ### Positive
 
 - Core metric errors are likely to be caught before they affect published model comparisons.
-- Adapter boundary bugs receive explicit non-tautological differential verification.
+- Adapter boundary bugs receive explicit verification against an independent position-wise oracle rather than a self-consistent identity alone.
 - Public contributors and forks can run the entire public verification suite without secrets or GPUs.
 - Mutation tests verify that tests assert semantics rather than merely execute code.
 - Contract tests make model and task adapters replaceable.
 - Golden fixtures make accidental scoring and calibration changes visible in review.
-- Independent public differential checks reduce the risk of an internally self-consistent but globally wrong harness.
+- Independent public differential checks reduce the risk of an internally self-consistent but globally wrong scoring/aggregation harness.
 - Execution-invariance reruns test more than repeated execution under one identical runtime configuration.
 
 ### Negative
@@ -337,6 +353,7 @@ The same rule applies to examples in documentation.
 - Hidden benchmark integration requires a second trusted test/evaluation path.
 - Future non-byte adapters require explicit continuation-boundary semantics rather than assuming byte-model behaviour generalizes.
 - Differential compatibility checks require maintaining a frozen external reference specification.
+- Public CPU CI cannot by itself establish deterministic behaviour of the production GPU evaluation backend.
 
 ## Rejected alternatives
 
@@ -345,6 +362,10 @@ The same rule applies to examples in documentation.
 Rejected because approximate smoke-test agreement is expensive, weakly diagnostic and may still pass when scoring logic is subtly wrong.
 
 This does **not** reject reproducing a known public result under a matched protocol as an independent differential oracle; that is explicitly part of the verification strategy above.
+
+### Treat the continuation decomposition identity as sufficient verification
+
+Rejected because a tautological subtraction implementation can satisfy the identity while sharing the same boundary bug as `sequence_logprob`. Independent position-wise semantic verification is required.
 
 ### Run private benchmark evaluation for every public pull request
 
