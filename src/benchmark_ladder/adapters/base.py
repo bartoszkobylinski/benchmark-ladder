@@ -35,6 +35,7 @@ class DecodingConfig:
     top_k: int | None = None
     top_p: float | None = None
     stop_policy_id: str | None = None
+    tie_break_policy_id: str | None = None
     seed: int | None = None
 
     def __post_init__(self) -> None:
@@ -44,14 +45,20 @@ class DecodingConfig:
             raise ValueError("top_k must be > 0 when set")
         if self.top_p is not None and not 0.0 < self.top_p <= 1.0:
             raise ValueError("top_p must be in (0, 1]")
-        if self.stop_policy_id is not None and not self.stop_policy_id:
-            raise ValueError("stop_policy_id must be non-empty when set")
+        for name, value in (
+            ("stop_policy_id", self.stop_policy_id),
+            ("tie_break_policy_id", self.tie_break_policy_id),
+        ):
+            if value is not None and not value:
+                raise ValueError(f"{name} must be non-empty when set")
 
         if self.mode is DecodingMode.GREEDY:
             if any(
                 value is not None for value in (self.temperature, self.top_k, self.top_p, self.seed)
             ):
                 raise ValueError("greedy decoding must not carry sampling parameters")
+            if self.tie_break_policy_id is None:
+                raise ValueError("greedy decoding requires an explicit tie_break_policy_id")
         else:
             if self.temperature is None or self.temperature <= 0.0:
                 raise ValueError("sampling requires temperature > 0")
@@ -65,6 +72,9 @@ class ModelAdapter(Protocol):
 
     ``generate`` returns only the newly generated continuation, not ``prompt + continuation``.
     ``count_units`` makes the unit behind ``max_new_units`` explicit and testable.
+
+    ``runtime_checkable`` verifies attribute presence only. It MUST NOT be treated as adapter
+    conformance or signature validation; the contract suite provides that validation.
     """
 
     def sequence_logprob(self, data: bytes) -> float:
