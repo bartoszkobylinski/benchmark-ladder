@@ -9,13 +9,22 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from benchmark_ladder.adapters import DecodingConfig, GenerationUnit
-from benchmark_ladder.execution import PairwiseEvaluationRequest, run_pairwise_evaluation
+from benchmark_ladder.execution import (
+    LanguageModelEvaluationRequest,
+    PairwiseEvaluationRequest,
+    run_language_model_evaluation,
+    run_pairwise_evaluation,
+)
+from benchmark_ladder.language_model import BitsPerByteScoringPolicy
 from benchmark_ladder.plugins import load_adapter
 from benchmark_ladder.results import ModelMetadata, TrainingMetadata
 from benchmark_ladder.runner import PairwiseItem, PairwiseScoringPolicy
 from benchmark_ladder.taskio import (
+    canonical_language_model_items_digest,
     canonical_pairwise_items_digest,
+    load_language_model_jsonl,
     load_pairwise_jsonl,
+    write_language_model_observations,
     write_pairwise_observations,
     write_text,
 )
@@ -90,6 +99,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="replace existing result/observation outputs after explicit operator choice",
     )
 
+    evaluate_lm = subparsers.add_parser(
+        "evaluate-lm",
+        help="run held-out byte sequences and report corpus bits-per-byte",
+    )
+    evaluate_lm.add_argument("--adapter", required=True, help="adapter factory as module:factory")
+    evaluate_lm.add_argument("--adapter-config", type=Path)
+    evaluate_lm.add_argument("--task-file", required=True, type=Path)
+    evaluate_lm.add_argument("--result-out", required=True, type=Path)
+    evaluate_lm.add_argument(
+        "--observations-out",
+        required=True,
+        type=Path,
+        help="private destination for per-sequence observations",
+    )
+    evaluate_lm.add_argument("--benchmark-id", required=True)
+    evaluate_lm.add_argument("--benchmark-version", required=True)
+    evaluate_lm.add_argument("--scorer-version", required=True)
+    evaluate_lm.add_argument("--taxonomy-version", required=True)
+    evaluate_lm.add_argument("--runner-git-sha", required=True)
+    evaluate_lm.add_argument("--release-commitment", required=True)
+    evaluate_lm.add_argument("--reference-pool-id")
+    evaluate_lm.add_argument("--parameters", required=True, type=int)
+    evaluate_lm.add_argument("--architecture", required=True)
+    evaluate_lm.add_argument("--tokenizer", required=True)
+    evaluate_lm.add_argument("--training-tokens", required=True, type=int)
+    evaluate_lm.add_argument("--checkpoint-step", type=int)
+    evaluate_lm.add_argument(
+        "--force",
+        action="store_true",
+        help="replace existing result/observation outputs after explicit operator choice",
+    )
+
     smoke = subparsers.add_parser("smoke", help="run the public synthetic end-to-end fixture")
     smoke.add_argument("--output-dir", required=True, type=Path)
     smoke.add_argument("--force", action="store_true")
@@ -103,6 +144,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "evaluate-pairwise":
             return _run_evaluate_pairwise(args)
+        if args.command == "evaluate-lm":
+            return _run_evaluate_language_model(args)
         if args.command == "smoke":
             return _run_smoke(args)
     except (AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:
@@ -155,6 +198,54 @@ def _run_evaluate_pairwise(args: argparse.Namespace) -> int:
     # Private observations are written first. A failure there must not leave a publishable result
     # that lacks the retained evidence needed for later rescoring and release reconciliation.
     write_pairwise_observations(
+        observations_path,
+        observations,
+        task_items_digest=task_items_digest,
+        scorer_config_digest=policy.config_digest,
+        release_commitment=args.release_commitment,
+        overwrite=bool(args.force),
+    )
+    write_text(result_path, result.canonical_json() + "\n", overwrite=bool(args.force))
+    return 0
+
+
+def _run_evaluate_language_model(args: argparse.Namespace) -> int:
+    result_path = Path(args.result_out)
+    observations_path = Path(args.observations_out)
+    if result_path.resolve() == observations_path.resolve():
+        raise ValueError("result-out and observations-out must be different paths")
+    _ensure_outputs_available((observations_path, result_path), force=bool(args.force))
+
+    adapter = load_adapter(args.adapter, args.adapter_config)
+    items = load_language_model_jsonl(Path(args.task_file))
+    task_items_digest = canonical_language_model_items_digest(items)
+    policy = BitsPerByteScoringPolicy(version=args.scorer_version)
+    request = LanguageModelEvaluationRequest(
+        adapter=adapter,
+        items=items,
+        scoring_policy=policy,
+        model=ModelMetadata(
+            parameters=args.parameters,
+            architecture=args.architecture,
+            tokenizer=args.tokenizer,
+        ),
+        training=TrainingMetadata(
+            tokens=args.training_tokens,
+            checkpoint_step=args.checkpoint_step,
+        ),
+        benchmark_id=args.benchmark_id,
+        benchmark_version=args.benchmark_version,
+        taxonomy_version=args.taxonomy_version,
+        runner_git_sha=args.runner_git_sha,
+        release_commitment=args.release_commitment,
+        reference_pool_id=args.reference_pool_id,
+    )
+    try:
+        result, observations = run_language_model_evaluation(request)
+    except Exception as exc:
+        raise RuntimeError(f"adapter evaluation failed ({type(exc).__name__})") from exc
+
+    write_language_model_observations(
         observations_path,
         observations,
         task_items_digest=task_items_digest,
