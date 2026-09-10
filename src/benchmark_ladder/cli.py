@@ -31,6 +31,8 @@ from benchmark_ladder.taskio import (
 
 
 class _SmokeAdapter:
+    sequence_start_semantics = "public-smoke-independent-sequence-v1"
+
     def __init__(self) -> None:
         self._scores = {
             b"a": -1.0,
