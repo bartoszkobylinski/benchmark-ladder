@@ -64,9 +64,7 @@ def load_adapter(spec: str, config_path: Path | None = None) -> ModelAdapter:
     try:
         adapter = factory(config)
     except Exception as exc:
-        raise AdapterFactoryError(
-            f"adapter factory failed ({type(exc).__name__})"
-        ) from exc
+        raise AdapterFactoryError(f"adapter factory failed ({type(exc).__name__})") from exc
     if not isinstance(adapter, ModelAdapter):
         raise TypeError("adapter factory returned an object missing required adapter methods")
     return adapter
