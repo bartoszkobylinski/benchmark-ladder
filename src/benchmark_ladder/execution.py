@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from benchmark_ladder.adapters import ModelAdapter
 from benchmark_ladder.language_model import (
@@ -99,6 +99,15 @@ def run_language_model_evaluation(
 ) -> tuple[EvaluationResult, tuple[LanguageModelObservation, ...]]:
     """Run held-out likelihood scoring and bind corpus BPB to public provenance."""
 
+    sequence_start_semantics = request.adapter.sequence_start_semantics
+    if not isinstance(sequence_start_semantics, str) or not sequence_start_semantics.strip():
+        raise ValueError("adapter sequence_start_semantics must be a non-empty string")
+    if (
+        request.model.sequence_start_semantics is not None
+        and request.model.sequence_start_semantics != sequence_start_semantics
+    ):
+        raise ValueError("model provenance conflicts with adapter sequence_start_semantics")
+
     observations = evaluate_language_model(
         request.adapter,
         request.items,
@@ -116,7 +125,7 @@ def run_language_model_evaluation(
         scorer_config_digest=request.scoring_policy.config_digest,
     )
     result = EvaluationResult(
-        model=request.model,
+        model=replace(request.model, sequence_start_semantics=sequence_start_semantics),
         training=request.training,
         evaluation=evaluation,
         execution=ExecutionMetadata(status=ExecutionStatus.MEASURED),
