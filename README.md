@@ -22,7 +22,7 @@ Real task bytes stay outside this repository. The CLI consumes a strict JSONL ta
 {"example_id":"opaque-001","context_b64":"Y3R4","candidates_b64":["YQ==","Yg=="],"gold_index":0}
 ```
 
-The loader rejects non-canonical base64 encodings. Task identity is computed from a canonical serialization of the decoded items, so source-file JSON whitespace, key order and line endings do not change the recorded `task_items_digest`.
+The loader rejects non-canonical base64 encodings. Task identity is computed from a canonical serialization of the decoded items, so source-file JSON whitespace, key order and line endings do not change the private `task_items_digest`. Release-local ids and item order are deliberately included in that identity: rotating either defines a distinct frozen release.
 
 Concrete model support is supplied by an externally installed adapter factory with the form `module:factory`. The factory receives a JSON object and returns an object implementing the public `ModelAdapter` contract.
 
@@ -47,15 +47,9 @@ benchmark-ladder evaluate-pairwise \
   --checkpoint-step 7250
 ```
 
-Per-example observations are intentionally written separately from the public aggregate result. The observations contain scores, lengths, margins and decisions, but not task context or candidate bytes. Both output files are written atomically, and existing evidence is not overwritten unless `--force` is explicitly requested.
+Per-example observations are intentionally written separately from the public aggregate result. The private observation file begins with a `run_metadata` record that carries the canonical `task_items_digest`, the scorer configuration digest and the release commitment, followed by observation records containing scores, lengths, margins and decisions but not task context or candidate bytes. Both output files are written atomically, and existing evidence is not overwritten unless `--force` is explicitly requested.
 
-The public result records three distinct provenance anchors:
-
-- `task_items_digest`: SHA-256 over the canonical decoded pairwise items actually evaluated;
-- `scorer_config_digest`: SHA-256 over the semantic pairwise scorer configuration, including normalization unit and tie epsilon;
-- `release_commitment`: the externally supplied commitment for the frozen hidden evaluation release described by ADR-0002.
-
-These values serve different purposes. `release_commitment` is not the task-file hash: the release commitment is expected to bind a frozen release manifest, while that manifest should include the recorded `task_items_digest`. This preserves the salted release-commitment design while making the exact evaluated item set falsifiable and auditable.
+The provenance boundary intentionally keeps the unsalted hidden-item content digest private. The public result records `scorer_config_digest`, which identifies the semantic pairwise scorer configuration, and `release_commitment`, the externally supplied commitment for the frozen hidden evaluation release described by ADR-0002. The trusted evaluator reconciles the public commitment with the private frozen release manifest, and that manifest binds the private `task_items_digest`. This avoids publishing a guessing oracle for low-entropy hidden task material while preserving an auditable chain to the exact decoded items that were evaluated.
 
 The current pairwise normalization path is byte-only until the adapter contract gains boundary-aware token/model-unit counting.
 
