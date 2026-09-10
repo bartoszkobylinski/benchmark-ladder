@@ -40,11 +40,11 @@ def test_run_pairwise_evaluation_binds_metrics_and_provenance() -> None:
     assert result.evaluation.release_commitment == COMMITMENT
 
 
-def test_same_version_with_different_scorer_semantics_changes_public_provenance() -> None:
-    items = (PairwiseItem("one", b"ctx", (b"a", b"b"), 0),)
-    common = dict(
+def _semantic_request(policy: PairwiseScoringPolicy) -> PairwiseEvaluationRequest:
+    return PairwiseEvaluationRequest(
         adapter=ScriptedPairwiseAdapter({b"a": -1.0, b"b": -1.0 + 1e-9}),
-        items=items,
+        items=(PairwiseItem("one", b"ctx", (b"a", b"b"), 0),),
+        scoring_policy=policy,
         model=ModelMetadata(parameters=1, architecture="toy", tokenizer="byte"),
         training=TrainingMetadata(tokens=0),
         benchmark_id="private-pairwise",
@@ -53,6 +53,9 @@ def test_same_version_with_different_scorer_semantics_changes_public_provenance(
         runner_git_sha="deadbeef",
         release_commitment=COMMITMENT,
     )
+
+
+def test_same_version_with_different_scorer_semantics_changes_public_provenance() -> None:
     strict_policy = PairwiseScoringPolicy(
         version="same-label",
         normalization_unit=GenerationUnit.BYTE,
@@ -64,12 +67,8 @@ def test_same_version_with_different_scorer_semantics_changes_public_provenance(
         tie_epsilon_per_unit=1e-6,
     )
 
-    strict_result, _ = run_pairwise_evaluation(
-        PairwiseEvaluationRequest(scoring_policy=strict_policy, **common)
-    )
-    loose_result, _ = run_pairwise_evaluation(
-        PairwiseEvaluationRequest(scoring_policy=loose_policy, **common)
-    )
+    strict_result, _ = run_pairwise_evaluation(_semantic_request(strict_policy))
+    loose_result, _ = run_pairwise_evaluation(_semantic_request(loose_policy))
 
     assert strict_result.evaluation.scorer_version == loose_result.evaluation.scorer_version
     assert (
