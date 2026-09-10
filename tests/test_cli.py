@@ -120,9 +120,7 @@ def test_evaluate_pairwise_cli_refuses_existing_outputs_without_force(tmp_path: 
         encoding="utf-8",
     )
     adapter_config = tmp_path / "adapter.json"
-    adapter_config.write_text(
-        json.dumps({"scores": {"a": -1.0, "b": -2.0}}), encoding="utf-8"
-    )
+    adapter_config.write_text(json.dumps({"scores": {"a": -1.0, "b": -2.0}}), encoding="utf-8")
     result_path = tmp_path / "result.json"
     observations_path = tmp_path / "observations.jsonl"
     result_path.write_text("existing-result", encoding="utf-8")
