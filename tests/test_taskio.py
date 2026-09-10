@@ -13,6 +13,10 @@ from benchmark_ladder.taskio import (
     write_pairwise_observations,
 )
 
+TASK_DIGEST = "sha256:" + ("a" * 64)
+SCORER_DIGEST = "sha256:" + ("b" * 64)
+RELEASE_COMMITMENT = "sha256:" + ("c" * 64)
+
 
 def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
@@ -141,7 +145,19 @@ def test_canonical_digest_changes_when_evaluated_bytes_change() -> None:
     assert canonical_pairwise_items_digest(items_a) != canonical_pairwise_items_digest(items_b)
 
 
-def test_observation_json_contains_no_task_bytes(tmp_path: Path) -> None:
+def test_canonical_digest_includes_release_local_id_and_order() -> None:
+    first = PairwiseItem("id-a", b"ctx", (b"a", b"b"), 0)
+    second = PairwiseItem("id-b", b"ctx", (b"c", b"d"), 1)
+
+    assert canonical_pairwise_items_digest((first,)) != canonical_pairwise_items_digest(
+        (PairwiseItem("id-c", b"ctx", (b"a", b"b"), 0),)
+    )
+    assert canonical_pairwise_items_digest((first, second)) != canonical_pairwise_items_digest(
+        (second, first)
+    )
+
+
+def test_observation_file_contains_private_run_metadata_without_task_bytes(tmp_path: Path) -> None:
     observation = PairwiseObservation(
         example_id="opaque-id",
         scorer_version="pairwise-v1",
@@ -164,5 +180,19 @@ def test_observation_json_contains_no_task_bytes(tmp_path: Path) -> None:
     assert "secret candidate" not in encoded
 
     output = tmp_path / "observations.jsonl"
-    write_pairwise_observations(output, (observation,))
-    assert output.read_text(encoding="utf-8") == encoded + "\n"
+    write_pairwise_observations(
+        output,
+        (observation,),
+        task_items_digest=TASK_DIGEST,
+        scorer_config_digest=SCORER_DIGEST,
+        release_commitment=RELEASE_COMMITMENT,
+    )
+    records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert records[0] == {
+        "record_type": "run_metadata",
+        "release_commitment": RELEASE_COMMITMENT,
+        "scorer_config_digest": SCORER_DIGEST,
+        "task_items_digest": TASK_DIGEST,
+    }
+    assert records[1]["record_type"] == "observation"
+    assert records[1]["example_id"] == "opaque-id"
