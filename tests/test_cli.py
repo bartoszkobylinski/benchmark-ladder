@@ -94,13 +94,20 @@ def test_evaluate_pairwise_cli_writes_result_and_private_observations(tmp_path: 
     assert result["metrics"]["accuracy"] == 1.0
     assert result["evaluation"]["scorer_version"] == "pairwise-cli-v1"
     assert result["evaluation"]["scorer_config_digest"].startswith("sha256:")
-    assert result["evaluation"]["task_items_digest"] == canonical_pairwise_items_digest(
-        load_pairwise_jsonl(task_path)
-    )
+    assert "task_items_digest" not in result["evaluation"]
     assert result["evaluation"]["release_commitment"] == COMMITMENT
 
+    records = [
+        json.loads(line) for line in observations_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert records[0]["record_type"] == "run_metadata"
+    assert records[0]["task_items_digest"] == canonical_pairwise_items_digest(
+        load_pairwise_jsonl(task_path)
+    )
+    assert records[0]["release_commitment"] == COMMITMENT
+    assert records[1]["record_type"] == "observation"
+    assert records[1]["example_id"] == "one"
     observation_text = observations_path.read_text(encoding="utf-8")
-    assert "one" in observation_text
     assert "context_b64" not in observation_text
     assert _b64(b"ctx") not in observation_text
 
@@ -191,8 +198,10 @@ def test_smoke_cli_runs_end_to_end(tmp_path: Path) -> None:
     assert exit_code == 0
     result = json.loads((output_dir / "result.json").read_text(encoding="utf-8"))
     assert result["evaluation"]["benchmark_id"] == "public-smoke"
-    assert result["evaluation"]["task_items_digest"].startswith("sha256:")
+    assert "task_items_digest" not in result["evaluation"]
     assert result["evaluation"]["scorer_config_digest"].startswith("sha256:")
     assert result["metrics"]["count"] == 3
     assert result["metrics"]["accuracy"] == 0.5
-    assert (output_dir / "observations.jsonl").read_text(encoding="utf-8").count("\n") == 3
+    records = (output_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(records) == 4
+    assert json.loads(records[0])["record_type"] == "run_metadata"
