@@ -31,12 +31,15 @@ class ModelMetadata:
     parameters: int
     architecture: str
     tokenizer: str
+    sequence_start_semantics: str | None = None
 
     def __post_init__(self) -> None:
         if self.parameters <= 0:
             raise ValueError("parameters must be > 0")
         if not self.architecture or not self.tokenizer:
             raise ValueError("architecture and tokenizer must be non-empty")
+        if self.sequence_start_semantics is not None and not self.sequence_start_semantics.strip():
+            raise ValueError("sequence_start_semantics must be non-empty when set")
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +158,7 @@ class EvaluationResult:
                 "parameters": self.model.parameters,
                 "architecture": self.model.architecture,
                 "tokenizer": self.model.tokenizer,
+                "sequence_start_semantics": self.model.sequence_start_semantics,
             },
             "training": {
                 "tokens": self.training.tokens,
@@ -230,6 +234,7 @@ class EvaluationResult:
                 parameters=_required_int(model_data, "parameters"),
                 architecture=_required_str(model_data, "architecture"),
                 tokenizer=_required_str(model_data, "tokenizer"),
+                sequence_start_semantics=_optional_str(model_data, "sequence_start_semantics"),
             ),
             training=TrainingMetadata(
                 tokens=_required_int(training_data, "tokens"),
