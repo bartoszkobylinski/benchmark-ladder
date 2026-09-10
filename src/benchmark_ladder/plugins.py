@@ -36,12 +36,16 @@ def load_adapter_factory(spec: str) -> AdapterFactory:
 
 
 def load_adapter_config(path: Path | None) -> Mapping[str, object]:
-    """Load an optional adapter configuration object without logging its contents."""
+    """Load an optional adapter configuration object without logging its contents or path."""
 
     if path is None:
         return {}
     try:
-        parsed: object = json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise OSError(f"unable to read adapter config ({type(exc).__name__})") from exc
+    try:
+        parsed: object = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid adapter config JSON: {exc.msg}") from exc
     if not isinstance(parsed, dict):
