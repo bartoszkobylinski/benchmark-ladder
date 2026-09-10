@@ -13,7 +13,12 @@ from benchmark_ladder.execution import PairwiseEvaluationRequest, run_pairwise_e
 from benchmark_ladder.plugins import load_adapter
 from benchmark_ladder.results import ModelMetadata, TrainingMetadata
 from benchmark_ladder.runner import PairwiseItem, PairwiseScoringPolicy
-from benchmark_ladder.taskio import load_pairwise_jsonl, write_pairwise_observations, write_text
+from benchmark_ladder.taskio import (
+    canonical_pairwise_items_digest,
+    load_pairwise_jsonl,
+    write_pairwise_observations,
+    write_text,
+)
 
 
 class _SmokeAdapter:
@@ -116,6 +121,7 @@ def _run_evaluate_pairwise(args: argparse.Namespace) -> int:
 
     adapter = load_adapter(args.adapter, args.adapter_config)
     items = load_pairwise_jsonl(Path(args.task_file))
+    task_items_digest = canonical_pairwise_items_digest(items)
     policy = PairwiseScoringPolicy(
         version=args.scorer_version,
         normalization_unit=GenerationUnit.BYTE,
@@ -147,8 +153,15 @@ def _run_evaluate_pairwise(args: argparse.Namespace) -> int:
         raise RuntimeError(f"adapter evaluation failed ({type(exc).__name__})") from exc
 
     # Private observations are written first. A failure there must not leave a publishable result
-    # that lacks the retained evidence needed for later rescoring.
-    write_pairwise_observations(observations_path, observations, overwrite=bool(args.force))
+    # that lacks the retained evidence needed for later rescoring and release reconciliation.
+    write_pairwise_observations(
+        observations_path,
+        observations,
+        task_items_digest=task_items_digest,
+        scorer_config_digest=policy.config_digest,
+        release_commitment=args.release_commitment,
+        overwrite=bool(args.force),
+    )
     write_text(result_path, result.canonical_json() + "\n", overwrite=bool(args.force))
     return 0
 
@@ -169,6 +182,7 @@ def _run_smoke(args: argparse.Namespace) -> int:
         PairwiseItem("wrong", b"ctx", (b"c", b"d"), 0),
         PairwiseItem("tie", b"ctx", (b"e", b"f"), 0),
     )
+    task_items_digest = canonical_pairwise_items_digest(items)
     commitment = "sha256:" + hashlib.sha256(b"benchmark-ladder-public-smoke-v1").hexdigest()
     request = PairwiseEvaluationRequest(
         adapter=_SmokeAdapter(),
@@ -183,7 +197,14 @@ def _run_smoke(args: argparse.Namespace) -> int:
         release_commitment=commitment,
     )
     result, observations = run_pairwise_evaluation(request)
-    write_pairwise_observations(observations_path, observations, overwrite=bool(args.force))
+    write_pairwise_observations(
+        observations_path,
+        observations,
+        task_items_digest=task_items_digest,
+        scorer_config_digest=policy.config_digest,
+        release_commitment=commitment,
+        overwrite=bool(args.force),
+    )
     write_text(result_path, result.canonical_json() + "\n", overwrite=bool(args.force))
     return 0
 
