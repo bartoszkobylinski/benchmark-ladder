@@ -8,6 +8,8 @@ NOT_CALLABLE = 7
 
 
 class FixtureAdapter:
+    sequence_start_semantics = "fixture-independent-sequence-v1"
+
     def __init__(self, scores: Mapping[str, float]) -> None:
         self._scores = dict(scores)
 

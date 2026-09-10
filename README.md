@@ -55,6 +55,44 @@ The current pairwise normalization path is byte-only until the adapter contract 
 
 External adapter factories execute inside the current trusted evaluator process. This CLI is not a sandbox for arbitrary submitted code. If untrusted model code must execute against hidden plaintext, the isolation requirements in ADR-0002 apply outside this process.
 
+## Held-out bits-per-byte evaluation
+
+The L0 likelihood path consumes held-out byte sequences using the same strict canonical-base64 boundary. Each JSONL record contains one independently scored sequence:
+
+```json
+{"example_id":"opaque-001","data_b64":"VGhpcyBpcyBoZWxkIG91dC4="}
+```
+
+Each record is passed unchanged to `ModelAdapter.sequence_logprob`. Record boundaries are part of benchmark semantics: splitting or joining records changes the start-of-sequence positions and can change the measured likelihood. A frozen release must therefore keep the same sequence boundaries and order across every checkpoint or model being compared, and its records must fit the supported scoring context of every adapter used for that comparison.
+
+Every adapter declares a stable `sequence_start_semantics` identifier describing how `sequence_logprob` treats the beginning of an independent sequence, including the first scored target and its prior/context. The held-out evaluator copies that identifier into public model provenance rather than accepting it as operator metadata. Changing the adapter's start convention therefore changes the published provenance even when the checkpoint and corpus are otherwise identical.
+
+Corpus bits-per-byte is computed as total negative log-likelihood in nats divided by total raw input bytes and `ln(2)`. The harness sums NLL and bytes first; it does not average per-sequence BPB, which would overweight short records. The scorer permits only a versioned, very small positive log-probability tolerance for floating-point overshoot around zero; accepted overshoots are clamped to zero and counted in the public aggregate.
+
+```bash
+benchmark-ladder evaluate-lm \
+  --adapter my_adapter.package:create_adapter \
+  --adapter-config /private/model.json \
+  --task-file /private/heldout.jsonl \
+  --result-out ./result.json \
+  --observations-out /private/results/observations.jsonl \
+  --benchmark-id heldout-lm \
+  --benchmark-version 1 \
+  --scorer-version bpb-independent-sequence-v1 \
+  --taxonomy-version 1 \
+  --runner-git-sha "$GIT_SHA" \
+  --release-commitment "sha256:<64-hex>" \
+  --parameters 8160256 \
+  --architecture transformer \
+  --tokenizer byte \
+  --training-tokens 31334400 \
+  --checkpoint-step 7250
+```
+
+The public result reports corpus `bits_per_byte`, total `byte_count`, sequence `count`, total `negative_log_likelihood_nats` and the positive-logprob clamp count, together with the normal public provenance anchors. The unsalted canonical digest of the held-out bytes remains only in private run metadata, following the same release-commitment chain as pairwise evaluation. Per-sequence private observations retain byte counts, sequence log-probabilities, scorer configuration identity and clamp status, but never the held-out bytes themselves.
+
+A public result intentionally cannot prove by itself that two runs used identical hidden record boundaries. That comparison is performed inside the trusted evaluator by reconciling each release commitment with the private frozen manifest and item digest. The bare hidden-item digest must remain private rather than being published merely to make re-chunking publicly detectable.
+
 ## Architecture decisions
 
 See `docs/adr/` for the evaluation-ladder architecture, hidden-benchmark boundary, and verification/reproducibility policy.

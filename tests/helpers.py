@@ -21,6 +21,8 @@ class IndependentByteOracle:
 
 
 class DeterministicByteAdapter:
+    sequence_start_semantics = "test-byte-prior-zero-v1"
+
     def sequence_logprob(self, data: bytes) -> float:
         total = 0.0
         previous = 0

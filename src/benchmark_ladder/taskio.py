@@ -12,9 +12,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+from benchmark_ladder.language_model import LanguageModelItem, LanguageModelObservation
 from benchmark_ladder.runner import PairwiseItem, PairwiseObservation
 
 _PAIRWISE_KEYS = {"example_id", "context_b64", "candidates_b64", "gold_index"}
+_LANGUAGE_MODEL_KEYS = {"example_id", "data_b64"}
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -94,6 +96,50 @@ def load_pairwise_jsonl(path: Path) -> tuple[PairwiseItem, ...]:
     return tuple(items)
 
 
+def load_language_model_jsonl(path: Path) -> tuple[LanguageModelItem, ...]:
+    """Load independently scored held-out byte sequences from strict JSONL."""
+
+    items: list[LanguageModelItem] = []
+    seen_ids: set[str] = set()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise OSError(f"unable to read task input ({type(exc).__name__})") from exc
+    for line_number, raw_line in enumerate(text.split("\n"), start=1):
+        if raw_line.endswith("\r"):
+            raw_line = raw_line[:-1]
+        if not raw_line.strip():
+            continue
+        data = _parse_object(raw_line, line_number=line_number)
+        if set(data) != _LANGUAGE_MODEL_KEYS:
+            missing = sorted(_LANGUAGE_MODEL_KEYS - set(data))
+            extra = sorted(set(data) - _LANGUAGE_MODEL_KEYS)
+            raise ValueError(
+                f"task input line {line_number}: language-model item keys mismatch; "
+                f"missing={missing}, extra={extra}"
+            )
+
+        example_id = _required_str(data, "example_id", line_number)
+        if example_id in seen_ids:
+            raise ValueError(f"task input line {line_number}: duplicate example_id")
+        seen_ids.add(example_id)
+
+        item_bytes = _decode_b64(
+            _required_str(data, "data_b64", line_number),
+            field="data_b64",
+            line_number=line_number,
+        )
+        if not item_bytes:
+            raise ValueError(
+                f"task input line {line_number}: data_b64 must decode to non-empty bytes"
+            )
+        items.append(LanguageModelItem(example_id=example_id, data=item_bytes))
+
+    if not items:
+        raise ValueError("task input contains no items")
+    return tuple(items)
+
+
 def canonical_pairwise_items_digest(items: tuple[PairwiseItem, ...]) -> str:
     """Hash canonical decoded task semantics for private release provenance.
 
@@ -116,6 +162,30 @@ def canonical_pairwise_items_digest(items: tuple[PairwiseItem, ...]) -> str:
             "context_b64": base64.b64encode(item.context).decode("ascii"),
             "example_id": item.example_id,
             "gold_index": item.gold_index,
+        }
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("ascii")
+        digest.update(encoded)
+        digest.update(b"\n")
+    return "sha256:" + digest.hexdigest()
+
+
+def canonical_language_model_items_digest(items: tuple[LanguageModelItem, ...]) -> str:
+    """Hash canonical held-out sequence semantics for private release provenance.
+
+    Item ids, decoded bytes and item order are all part of the frozen release identity. Record
+    boundaries are intentionally preserved because each record is scored as an independent
+    sequence and re-chunking can change the measured likelihood.
+    """
+
+    if not items:
+        raise ValueError("cannot digest an empty language-model item set")
+    digest = hashlib.sha256()
+    for item in items:
+        payload = {
+            "data_b64": base64.b64encode(item.data).decode("ascii"),
+            "example_id": item.example_id,
         }
         encoded = json.dumps(
             payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
@@ -167,6 +237,23 @@ def pairwise_observation_json(observation: PairwiseObservation) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
+def language_model_observation_json(observation: LanguageModelObservation) -> str:
+    """Serialize one likelihood observation without held-out sequence bytes."""
+
+    payload = {
+        "record_type": "observation",
+        "example_id": observation.example_id,
+        "scorer_version": observation.scorer_version,
+        "scorer_config_digest": observation.scorer_config_digest,
+        "byte_count": observation.byte_count,
+        "sequence_logprob_nats": observation.sequence_logprob_nats,
+        "positive_logprob_clamped": observation.positive_logprob_clamped,
+        "negative_log_likelihood_nats": observation.negative_log_likelihood_nats,
+        "bits_per_byte": observation.bits_per_byte,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
 def write_pairwise_observations(
     path: Path,
     observations: tuple[PairwiseObservation, ...],
@@ -187,6 +274,33 @@ def write_pairwise_observations(
             release_commitment=release_commitment,
         ),
         *(pairwise_observation_json(observation) for observation in observations),
+    ]
+    _write_text(path, "\n".join(records) + "\n", overwrite=overwrite)
+
+
+def write_language_model_observations(
+    path: Path,
+    observations: tuple[LanguageModelObservation, ...],
+    *,
+    task_items_digest: str,
+    scorer_config_digest: str,
+    release_commitment: str,
+    overwrite: bool = False,
+) -> None:
+    """Write private run metadata plus held-out likelihood observations as JSONL."""
+
+    if not observations:
+        raise ValueError("cannot write an empty observation set")
+    observation_digests = {observation.scorer_config_digest for observation in observations}
+    if observation_digests != {scorer_config_digest}:
+        raise ValueError("observation scorer configuration does not match run metadata")
+    records = [
+        private_run_metadata_json(
+            task_items_digest=task_items_digest,
+            scorer_config_digest=scorer_config_digest,
+            release_commitment=release_commitment,
+        ),
+        *(language_model_observation_json(observation) for observation in observations),
     ]
     _write_text(path, "\n".join(records) + "\n", overwrite=overwrite)
 
