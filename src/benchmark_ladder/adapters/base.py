@@ -70,6 +70,12 @@ class DecodingConfig:
 class ModelAdapter(Protocol):
     """Minimal interface exposed to public task/scoring machinery.
 
+    ``sequence_start_semantics`` is a stable, versioned identifier for the convention used by
+    ``sequence_logprob`` at the beginning of an independent sequence. It must distinguish any
+    change that can alter which first target is scored or what prior/context that target is
+    conditioned on. Likelihood results bind this identifier into public provenance so adapter
+    wrappers with different start conventions cannot look equivalent.
+
     ``generate`` returns only the newly generated continuation, not ``prompt + continuation``.
     ``count_units`` makes the unit behind ``max_new_units`` explicit and testable.
 
@@ -77,8 +83,10 @@ class ModelAdapter(Protocol):
     conformance or signature validation; the contract suite provides that validation.
     """
 
+    sequence_start_semantics: str
+
     def sequence_logprob(self, data: bytes) -> float:
-        """Return log P(data), under the adapter's documented start-of-sequence semantics."""
+        """Return natural-log P(data) under ``sequence_start_semantics``."""
 
     def continuation_logprob(self, context: bytes, continuation: bytes) -> float:
         """Return log P(continuation | context)."""
