@@ -2,13 +2,12 @@ from benchmark_ladder.adapters import GenerationUnit
 from benchmark_ladder.execution import PairwiseEvaluationRequest, run_pairwise_evaluation
 from benchmark_ladder.results import ModelMetadata, TrainingMetadata
 from benchmark_ladder.runner import PairwiseItem, PairwiseScoringPolicy
-from benchmark_ladder.taskio import canonical_pairwise_items_digest
 from tests.helpers import ScriptedPairwiseAdapter
 
 COMMITMENT = "sha256:" + ("b" * 64)
 
 
-def test_run_pairwise_evaluation_binds_metrics_and_provenance() -> None:
+def test_run_pairwise_evaluation_binds_metrics_and_public_provenance() -> None:
     policy = PairwiseScoringPolicy(
         version="pairwise-e2e-v1",
         normalization_unit=GenerationUnit.BYTE,
@@ -35,9 +34,11 @@ def test_run_pairwise_evaluation_binds_metrics_and_provenance() -> None:
     assert result.metrics["accuracy"] == 1.0
     assert result.evaluation.scorer_version == policy.version
     assert result.evaluation.scorer_config_digest == policy.config_digest
-    assert result.evaluation.task_items_digest == canonical_pairwise_items_digest(items)
     assert result.evaluation.reference_pool_id == "pool-1"
     assert result.evaluation.release_commitment == COMMITMENT
+    evaluation_payload = result.to_dict()["evaluation"]
+    assert isinstance(evaluation_payload, dict)
+    assert "task_items_digest" not in evaluation_payload
 
 
 def _semantic_request(policy: PairwiseScoringPolicy) -> PairwiseEvaluationRequest:
