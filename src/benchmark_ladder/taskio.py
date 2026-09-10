@@ -244,8 +244,10 @@ def language_model_observation_json(observation: LanguageModelObservation) -> st
         "record_type": "observation",
         "example_id": observation.example_id,
         "scorer_version": observation.scorer_version,
+        "scorer_config_digest": observation.scorer_config_digest,
         "byte_count": observation.byte_count,
         "sequence_logprob_nats": observation.sequence_logprob_nats,
+        "positive_logprob_clamped": observation.positive_logprob_clamped,
         "negative_log_likelihood_nats": observation.negative_log_likelihood_nats,
         "bits_per_byte": observation.bits_per_byte,
     }
@@ -289,6 +291,9 @@ def write_language_model_observations(
 
     if not observations:
         raise ValueError("cannot write an empty observation set")
+    observation_digests = {observation.scorer_config_digest for observation in observations}
+    if observation_digests != {scorer_config_digest}:
+        raise ValueError("observation scorer configuration does not match run metadata")
     records = [
         private_run_metadata_json(
             task_items_digest=task_items_digest,
