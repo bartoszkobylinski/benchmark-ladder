@@ -125,9 +125,7 @@ def aggregate_language_model(
         raise ValueError("cannot aggregate observations from different scorer versions")
 
     total_bytes = sum(observation.byte_count for observation in observations)
-    total_nll = math.fsum(
-        observation.negative_log_likelihood_nats for observation in observations
-    )
+    total_nll = math.fsum(observation.negative_log_likelihood_nats for observation in observations)
     corpus_bpb = bits_per_byte(total_nll, total_bytes)
     return {
         "count": len(observations),
