@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
@@ -24,7 +26,10 @@ def load_pairwise_jsonl(path: Path) -> tuple[PairwiseItem, ...]:
 
     items: list[PairwiseItem] = []
     seen_ids: set[str] = set()
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise OSError(f"unable to read task input ({type(exc).__name__})") from exc
     for line_number, raw_line in enumerate(text.split("\n"), start=1):
         if raw_line.endswith("\r"):
             raw_line = raw_line[:-1]
@@ -137,24 +142,46 @@ def pairwise_observation_json(observation: PairwiseObservation) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
-def write_pairwise_observations(path: Path, observations: tuple[PairwiseObservation, ...]) -> None:
+def write_pairwise_observations(
+    path: Path,
+    observations: tuple[PairwiseObservation, ...],
+    *,
+    overwrite: bool = False,
+) -> None:
     """Write private per-example observations as deterministic JSONL."""
 
     if not observations:
         raise ValueError("cannot write an empty observation set")
     text = "\n".join(pairwise_observation_json(observation) for observation in observations) + "\n"
-    _write_text(path, text)
+    _write_text(path, text, overwrite=overwrite)
 
 
-def write_text(path: Path, text: str) -> None:
-    """Write UTF-8 text, creating parent directories when necessary."""
+def write_text(path: Path, text: str, *, overwrite: bool = False) -> None:
+    """Atomically write UTF-8 text, creating parent directories when necessary."""
 
-    _write_text(path, text)
+    _write_text(path, text, overwrite=overwrite)
 
 
-def _write_text(path: Path, text: str) -> None:
+def _write_text(path: Path, text: str, *, overwrite: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if overwrite:
+            os.replace(temporary_path, path)
+        else:
+            try:
+                os.link(temporary_path, path)
+            except FileExistsError as exc:
+                raise FileExistsError("output path already exists; use explicit overwrite") from exc
+            temporary_path.unlink()
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
 
 
 def _parse_object(raw_line: str, *, line_number: int) -> Mapping[str, object]:
