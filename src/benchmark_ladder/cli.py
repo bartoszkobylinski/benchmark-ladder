@@ -79,9 +79,15 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--tokenizer", required=True)
     evaluate.add_argument("--training-tokens", required=True, type=int)
     evaluate.add_argument("--checkpoint-step", type=int)
+    evaluate.add_argument(
+        "--force",
+        action="store_true",
+        help="replace existing result/observation outputs after explicit operator choice",
+    )
 
     smoke = subparsers.add_parser("smoke", help="run the public synthetic end-to-end fixture")
     smoke.add_argument("--output-dir", required=True, type=Path)
+    smoke.add_argument("--force", action="store_true")
 
     return parser
 
@@ -94,7 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_evaluate_pairwise(args)
         if args.command == "smoke":
             return _run_smoke(args)
-    except (AttributeError, ImportError, OSError, TypeError, ValueError) as exc:
+    except (AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     parser.error(f"unknown command: {args.command}")
@@ -106,6 +112,7 @@ def _run_evaluate_pairwise(args: argparse.Namespace) -> int:
     observations_path = Path(args.observations_out)
     if result_path.resolve() == observations_path.resolve():
         raise ValueError("result-out and observations-out must be different paths")
+    _ensure_outputs_available((observations_path, result_path), force=bool(args.force))
 
     adapter = load_adapter(args.adapter, args.adapter_config)
     items = load_pairwise_jsonl(Path(args.task_file))
@@ -134,17 +141,24 @@ def _run_evaluate_pairwise(args: argparse.Namespace) -> int:
         release_commitment=args.release_commitment,
         reference_pool_id=args.reference_pool_id,
     )
-    result, observations = run_pairwise_evaluation(request)
+    try:
+        result, observations = run_pairwise_evaluation(request)
+    except Exception as exc:
+        raise RuntimeError(f"adapter evaluation failed ({type(exc).__name__})") from exc
 
     # Private observations are written first. A failure there must not leave a publishable result
     # that lacks the retained evidence needed for later rescoring.
-    write_pairwise_observations(observations_path, observations)
-    write_text(result_path, result.canonical_json() + "\n")
+    write_pairwise_observations(observations_path, observations, overwrite=bool(args.force))
+    write_text(result_path, result.canonical_json() + "\n", overwrite=bool(args.force))
     return 0
 
 
 def _run_smoke(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir)
+    observations_path = output_dir / "observations.jsonl"
+    result_path = output_dir / "result.json"
+    _ensure_outputs_available((observations_path, result_path), force=bool(args.force))
+
     policy = PairwiseScoringPolicy(
         version="public-smoke-pairwise-v1",
         normalization_unit=GenerationUnit.BYTE,
@@ -169,9 +183,16 @@ def _run_smoke(args: argparse.Namespace) -> int:
         release_commitment=commitment,
     )
     result, observations = run_pairwise_evaluation(request)
-    write_pairwise_observations(output_dir / "observations.jsonl", observations)
-    write_text(output_dir / "result.json", result.canonical_json() + "\n")
+    write_pairwise_observations(observations_path, observations, overwrite=bool(args.force))
+    write_text(result_path, result.canonical_json() + "\n", overwrite=bool(args.force))
     return 0
+
+
+def _ensure_outputs_available(paths: tuple[Path, ...], *, force: bool) -> None:
+    if force:
+        return
+    if any(path.exists() for path in paths):
+        raise FileExistsError("output path already exists; use --force to replace it")
 
 
 if __name__ == "__main__":
