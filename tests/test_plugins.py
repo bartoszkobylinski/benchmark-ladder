@@ -29,6 +29,16 @@ def test_load_adapter_config_requires_object(tmp_path: Path) -> None:
         load_adapter_config(config_path)
 
 
+def test_load_adapter_config_read_failure_does_not_echo_private_path(tmp_path: Path) -> None:
+    config_path = tmp_path / "private-model-secret-name.json"
+
+    with pytest.raises(OSError) as exc_info:
+        load_adapter_config(config_path)
+
+    assert str(config_path) not in str(exc_info.value)
+    assert "private-model-secret-name" not in str(exc_info.value)
+
+
 def test_load_adapter_instantiates_external_factory(tmp_path: Path) -> None:
     config_path = tmp_path / "adapter.json"
     config_path.write_text(json.dumps({"scores": {"a": -1.0, "b": -2.0}}), encoding="utf-8")
