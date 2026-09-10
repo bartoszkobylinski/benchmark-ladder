@@ -72,5 +72,8 @@ def test_same_version_with_different_scorer_semantics_changes_public_provenance(
     )
 
     assert strict_result.evaluation.scorer_version == loose_result.evaluation.scorer_version
-    assert strict_result.evaluation.scorer_config_digest != loose_result.evaluation.scorer_config_digest
+    assert (
+        strict_result.evaluation.scorer_config_digest
+        != loose_result.evaluation.scorer_config_digest
+    )
     assert strict_result.metrics != loose_result.metrics
