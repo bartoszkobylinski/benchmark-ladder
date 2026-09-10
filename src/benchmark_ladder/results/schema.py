@@ -62,7 +62,6 @@ class EvaluationMetadata:
     calibration_rule_version: str | None = None
     reference_pool_id: str | None = None
     release_commitment: str | None = None
-    task_items_digest: str | None = None
     scorer_config_digest: str | None = None
 
     def __post_init__(self) -> None:
@@ -85,7 +84,6 @@ class EvaluationMetadata:
                 raise ValueError(f"{optional_name} must be non-empty when set")
         digests = {
             "release_commitment": self.release_commitment,
-            "task_items_digest": self.task_items_digest,
             "scorer_config_digest": self.scorer_config_digest,
         }
         for digest_name, digest_value in digests.items():
@@ -173,7 +171,6 @@ class EvaluationResult:
                 "calibration_rule_version": self.evaluation.calibration_rule_version,
                 "reference_pool_id": self.evaluation.reference_pool_id,
                 "release_commitment": self.evaluation.release_commitment,
-                "task_items_digest": self.evaluation.task_items_digest,
             },
             "execution": {
                 "status": self.execution.status.value,
@@ -249,7 +246,6 @@ class EvaluationResult:
                 calibration_rule_version=_optional_str(evaluation_data, "calibration_rule_version"),
                 reference_pool_id=_optional_str(evaluation_data, "reference_pool_id"),
                 release_commitment=_optional_str(evaluation_data, "release_commitment"),
-                task_items_digest=_optional_str(evaluation_data, "task_items_digest"),
             ),
             execution=ExecutionMetadata(
                 status=ExecutionStatus(_required_str(execution_data, "status")),
