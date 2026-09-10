@@ -113,5 +113,7 @@ def test_empty_context_pairwise_results_bind_adapter_start_semantics() -> None:
     )
 
     assert first_result.metrics == second_result.metrics
-    assert first_result.model.sequence_start_semantics != second_result.model.sequence_start_semantics
+    assert (
+        first_result.model.sequence_start_semantics != second_result.model.sequence_start_semantics
+    )
     assert first_result.to_dict()["model"] != second_result.to_dict()["model"]
