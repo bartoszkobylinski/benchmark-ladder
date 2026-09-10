@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass
 
@@ -17,6 +18,10 @@ class PairwiseScoringPolicy:
     normalization unit. Raw margins scale the band by the longer candidate; normalized margins
     use the per-unit value directly. Changing this value changes published scores and therefore
     requires a new ``version``.
+
+    ``config_digest`` is derived mechanically from the semantic policy fields. Public results
+    record it alongside the human-readable version so changing scorer semantics while reusing a
+    version label remains detectable.
 
     Pairwise normalization is intentionally byte-only for now. Token and model-unit counts can
     depend on the context/candidate boundary, while the current ``count_units`` adapter method
@@ -38,6 +43,17 @@ class PairwiseScoringPolicy:
             )
         if not math.isfinite(self.tie_epsilon_per_unit) or self.tie_epsilon_per_unit < 0.0:
             raise ValueError("tie_epsilon_per_unit must be finite and >= 0")
+
+    @property
+    def config_digest(self) -> str:
+        """Return a stable digest of scorer semantics independent of the version label."""
+
+        payload = (
+            "pairwise-scoring-policy-v1\n"
+            f"normalization_unit={self.normalization_unit.value}\n"
+            f"tie_epsilon_per_unit={self.tie_epsilon_per_unit.hex()}\n"
+        ).encode("ascii")
+        return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
