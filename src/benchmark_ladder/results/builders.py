@@ -25,10 +25,9 @@ def evaluation_metadata_from_components(
     calibration_rule: VersionedComponent | None = None,
     reference_pool_id: str | None = None,
     release_commitment: str | None = None,
-    task_items_digest: str | None = None,
     scorer_config_digest: str | None = None,
 ) -> EvaluationMetadata:
-    """Construct provenance without independently retyping component version strings."""
+    """Construct public provenance without independently retyping component versions."""
 
     return EvaluationMetadata(
         benchmark_id=benchmark_id,
@@ -42,6 +41,5 @@ def evaluation_metadata_from_components(
         ),
         reference_pool_id=reference_pool_id,
         release_commitment=release_commitment,
-        task_items_digest=task_items_digest,
         scorer_config_digest=scorer_config_digest,
     )
