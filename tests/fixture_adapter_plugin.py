@@ -43,3 +43,13 @@ def create_adapter(config: Mapping[str, object]) -> ModelAdapter:
             raise TypeError("score values must be numeric")
         scores[key] = float(value)
     return FixtureAdapter(scores)
+
+
+def create_invalid_adapter(config: Mapping[str, object]) -> object:
+    del config
+    return object()
+
+
+def create_failing_adapter(config: Mapping[str, object]) -> ModelAdapter:
+    secret = config.get("secret", "missing")
+    raise ValueError(f"private configuration leaked here: {secret}")
