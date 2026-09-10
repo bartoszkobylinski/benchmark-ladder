@@ -1,10 +1,102 @@
-For what you’re doing with 8M → tens/hundreds of millions of parameters, I’d read these in this order:
-BabyLM Challenge / Findings of BabyLM — probably the closest direct precedent. BabyLM explicitly evaluates small language models under tight data budgets, using benchmarks such as BLiMP, BLiMP Supplement, EWoK, and (Super)GLUE. The 2024 evaluation describes BLiMP as minimal-pair grammatical discrimination, which is exactly the kind of continuous signal you want before harder QA benchmarks become useful.
-BabyLM papers at ACL Anthology
-“GPT-wee: How Small Can a Small Language Model Really Get?” — directly from BabyLM 2023 and specifically concerned with tiny models. It is worth mining the BabyLM proceedings because there are multiple experiments at genuinely small scales rather than “small = 1B”.
-Yam & Paek, “Teaching Tiny Minds” (2024) — models around 44M–58M, trained on only 10M words, evaluated on BLiMP/EWoK/GLUE. This gives you a good intermediate reference point between your 8M model and conventional 100M+ LMs.
-BabyLM 2024 baseline results are particularly useful for calibration. Their strict-small setup contains a 10M-word training regime, and the published pipeline reports, for example, BabyLlama around 69.8 BLiMP, whereas EWoK is only about 50.7. That illustrates exactly the phenomenon we were discussing: syntax moves well before world-knowledge reasoning.
-Kaplan et al., “Scaling Laws for Neural Language Models” (2020). They show that cross-entropy behaves smoothly as a power law with parameters, data, and compute across enormous ranges. This is fundamental to your ladder because validation loss is a continuous scale-sensitive measurement even when discrete benchmarks sit at chance.
-Hoffmann et al., “Training Compute-Optimal Large Language Models” / Chinchilla (2022). They trained 400+ models, although their smallest was about 70M parameters, so it doesn't directly solve your 8M problem. Still, it gives the methodology for constructing controlled scaling experiments over \(N\), \(D\), and compute.
-Wei et al., “Emergent Abilities of Large Language Models” (2022) argues that some downstream abilities seem absent at small scale and suddenly appear above some scale.
-More important for your particular problem: Schaeffer et al., “Are Emergent Abilities of Large Language Models a Mirage?” (2023). Their result is almost exactly the theoretical justification for not using accuracy-only benchmarks for 8M models: apparently discontinuous emergence can arise from the choice of metric. Continuous metrics reveal smooth improvements that exact-match/accuracy can hide.
+# benchmark-ladder
+
+Capability-resolved evaluation infrastructure for small language models.
+
+The repository separates public evaluation machinery from canonical hidden benchmark material. The public package contains adapter contracts, scoring, result schemas, verification and CLI orchestration. Hidden task content, answer keys and private per-example observations belong in access-controlled storage described by ADR-0002.
+
+## Quick smoke test
+
+After installing the package:
+
+```bash
+benchmark-ladder smoke --output-dir /tmp/benchmark-ladder-smoke
+```
+
+This runs a fully public synthetic fixture and writes `result.json` plus `observations.jsonl`. Existing outputs are not replaced unless `--force` is supplied explicitly.
+
+## Pairwise evaluation
+
+Real task bytes stay outside this repository. The CLI consumes a strict JSONL task file where all model-input bytes are canonical base64:
+
+```json
+{"example_id":"opaque-001","context_b64":"Y3R4","candidates_b64":["YQ==","Yg=="],"gold_index":0}
+```
+
+The loader rejects non-canonical base64 encodings. Task identity is computed from a canonical serialization of the decoded items, so source-file JSON whitespace, key order and line endings do not change the private `task_items_digest`. Release-local ids and item order are deliberately included in that identity: rotating either defines a distinct frozen release.
+
+Concrete model support is supplied by an externally installed adapter factory with the form `module:factory`. The factory receives a JSON object and returns an object implementing the public `ModelAdapter` contract.
+
+```bash
+benchmark-ladder evaluate-pairwise \
+  --adapter my_adapter.package:create_adapter \
+  --adapter-config /private/model.json \
+  --task-file /private/benchmark.jsonl \
+  --result-out ./result.json \
+  --observations-out /private/results/observations.jsonl \
+  --benchmark-id example-pairwise \
+  --benchmark-version 1 \
+  --scorer-version pairwise-byte-v1 \
+  --tie-epsilon-per-byte 1e-12 \
+  --taxonomy-version 1 \
+  --runner-git-sha "$GIT_SHA" \
+  --release-commitment "sha256:<64-hex>" \
+  --parameters 8160256 \
+  --architecture transformer \
+  --tokenizer byte \
+  --training-tokens 31334400 \
+  --checkpoint-step 7250
+```
+
+Per-example observations are intentionally written separately from the public aggregate result. The private observation file begins with a `run_metadata` record carrying the canonical `task_items_digest`, scorer configuration digest and release commitment. Observation records follow with scores, lengths, margins and decisions, but not task context or candidate bytes. Both output files are written atomically, and existing evidence is not overwritten unless `--force` is explicitly requested.
+
+The provenance boundary intentionally keeps the unsalted hidden-item content digest private. The public result records `scorer_config_digest`, which identifies the semantic pairwise scorer configuration, and `release_commitment`, the externally supplied commitment for the frozen hidden evaluation release described by ADR-0002. The trusted evaluator reconciles the public commitment with the private frozen release manifest, and that manifest binds the private `task_items_digest`. This avoids publishing a guessing oracle for low-entropy hidden task material while preserving an auditable chain to the exact decoded items that were evaluated.
+
+The current pairwise normalization path is byte-only until the adapter contract gains boundary-aware token/model-unit counting.
+
+External adapter factories execute inside the current trusted evaluator process. This CLI is not a sandbox for arbitrary submitted code. If untrusted model code must execute against hidden plaintext, the isolation requirements in ADR-0002 apply outside this process.
+
+## Held-out bits-per-byte evaluation
+
+The L0 likelihood path consumes held-out byte sequences using the same strict canonical-base64 boundary. Each JSONL record contains one independently scored sequence:
+
+```json
+{"example_id":"opaque-001","data_b64":"VGhpcyBpcyBoZWxkIG91dC4="}
+```
+
+Each record is passed unchanged to `ModelAdapter.sequence_logprob`. Record boundaries are part of benchmark semantics: splitting or joining records changes the start-of-sequence positions and can change the measured likelihood. A frozen release must therefore keep the same sequence boundaries and order across every checkpoint or model being compared, and its records must fit the supported scoring context of every adapter used for that comparison.
+
+Every adapter declares a stable `sequence_start_semantics` identifier describing how `sequence_logprob` treats the beginning of an independent sequence, including the first scored target and its prior/context. The held-out evaluator copies that identifier into public model provenance rather than accepting it as operator metadata. Changing the adapter's start convention therefore changes the published provenance even when the checkpoint and corpus are otherwise identical.
+
+Corpus bits-per-byte is computed as total negative log-likelihood in nats divided by total raw input bytes and `ln(2)`. The harness sums NLL and bytes first; it does not average per-sequence BPB, which would overweight short records. The scorer permits only a versioned, very small positive log-probability tolerance for floating-point overshoot around zero; accepted overshoots are clamped to zero and counted in the public aggregate.
+
+```bash
+benchmark-ladder evaluate-lm \
+  --adapter my_adapter.package:create_adapter \
+  --adapter-config /private/model.json \
+  --task-file /private/heldout.jsonl \
+  --result-out ./result.json \
+  --observations-out /private/results/observations.jsonl \
+  --benchmark-id heldout-lm \
+  --benchmark-version 1 \
+  --scorer-version bpb-independent-sequence-v1 \
+  --taxonomy-version 1 \
+  --runner-git-sha "$GIT_SHA" \
+  --release-commitment "sha256:<64-hex>" \
+  --parameters 8160256 \
+  --architecture transformer \
+  --tokenizer byte \
+  --training-tokens 31334400 \
+  --checkpoint-step 7250
+```
+
+The public result reports corpus `bits_per_byte`, total `byte_count`, sequence `count`, total `negative_log_likelihood_nats` and the positive-logprob clamp count, together with the normal public provenance anchors. The unsalted canonical digest of the held-out bytes remains only in private run metadata, following the same release-commitment chain as pairwise evaluation. Per-sequence private observations retain byte counts, sequence log-probabilities, scorer configuration identity and clamp status, but never the held-out bytes themselves.
+
+A public result intentionally cannot prove by itself that two runs used identical hidden record boundaries. That comparison is performed inside the trusted evaluator by reconciling each release commitment with the private frozen manifest and item digest. The bare hidden-item digest must remain private rather than being published merely to make re-chunking publicly detectable.
+
+## Architecture decisions
+
+See `docs/adr/` for the evaluation-ladder architecture, hidden-benchmark boundary, and verification/reproducibility policy.
+
+## Background reading
+
+For 8M through tens or hundreds of millions of parameters, useful references include BabyLM Challenge and Findings of BabyLM; GPT-wee; Yam & Paek, “Teaching Tiny Minds”; Kaplan et al., “Scaling Laws for Neural Language Models”; Hoffmann et al., “Training Compute-Optimal Large Language Models”; Wei et al., “Emergent Abilities of Large Language Models”; and Schaeffer et al., “Are Emergent Abilities of Large Language Models a Mirage?”. The recurring design lesson is that continuous metrics are necessary when discrete benchmark accuracy remains at chance or saturates.

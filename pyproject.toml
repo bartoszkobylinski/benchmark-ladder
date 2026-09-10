@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "benchmark-ladder"
+version = "0.1.0"
+description = "Capability-resolved evaluation infrastructure for small language models"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "benchmark-ladder contributors" }]
+dependencies = []
+
+[project.scripts]
+benchmark-ladder = "benchmark_ladder.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "hypothesis==6.168.0",
+  "mypy==2.3.1",
+  "pytest==9.1.1",
+  "ruff==0.16.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+pretty = true
+show_error_codes = true

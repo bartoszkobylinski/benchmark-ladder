@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.mutmut-cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Hidden benchmark material — defense in depth only.
+# Canonical private benchmarks must live in a separate private repository
+# or access-controlled store; ADR-0002 explicitly forbids relying on .gitignore
+# as the secrecy boundary.
+.private/
+private/
+benchmarks-private/
+benchmark-private/
+data/private/
+private-results/
+secrets/
+*.secret
+*.secret.*
+
+# Local trusted-evaluation mounts
+.local-benchmarks/
+.local-private-eval/
