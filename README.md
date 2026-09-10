@@ -47,7 +47,7 @@ benchmark-ladder evaluate-pairwise \
   --checkpoint-step 7250
 ```
 
-Per-example observations are intentionally written separately from the public aggregate result. The private observation file begins with a `run_metadata` record that carries the canonical `task_items_digest`, the scorer configuration digest and the release commitment, followed by observation records containing scores, lengths, margins and decisions but not task context or candidate bytes. Both output files are written atomically, and existing evidence is not overwritten unless `--force` is explicitly requested.
+Per-example observations are intentionally written separately from the public aggregate result. The private observation file begins with a `run_metadata` record carrying the canonical `task_items_digest`, scorer configuration digest and release commitment. Observation records follow with scores, lengths, margins and decisions, but not task context or candidate bytes. Both output files are written atomically, and existing evidence is not overwritten unless `--force` is explicitly requested.
 
 The provenance boundary intentionally keeps the unsalted hidden-item content digest private. The public result records `scorer_config_digest`, which identifies the semantic pairwise scorer configuration, and `release_commitment`, the externally supplied commitment for the frozen hidden evaluation release described by ADR-0002. The trusted evaluator reconciles the public commitment with the private frozen release manifest, and that manifest binds the private `task_items_digest`. This avoids publishing a guessing oracle for low-entropy hidden task material while preserving an auditable chain to the exact decoded items that were evaluated.
 
