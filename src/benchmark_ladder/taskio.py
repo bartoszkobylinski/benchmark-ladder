@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import cast
 from benchmark_ladder.runner import PairwiseItem, PairwiseObservation
 
 _PAIRWISE_KEYS = {"example_id", "context_b64", "candidates_b64", "gold_index"}
+_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def load_pairwise_jsonl(path: Path) -> tuple[PairwiseItem, ...]:
@@ -93,11 +95,13 @@ def load_pairwise_jsonl(path: Path) -> tuple[PairwiseItem, ...]:
 
 
 def canonical_pairwise_items_digest(items: tuple[PairwiseItem, ...]) -> str:
-    """Hash the canonical decoded task semantics, not source-file formatting.
+    """Hash canonical decoded task semantics for private release provenance.
 
-    This digest is intended to be included in a private frozen release manifest. JSON whitespace,
-    key order and line endings in the source file therefore do not change the task identity, while
-    any change to decoded bytes, item order, gold labels or release-local ids does.
+    The digest belongs only in trusted/private records because a bare content hash can be a
+    guessing oracle for low-entropy hidden tasks. JSON whitespace, key order and line endings do
+    not change task identity, while decoded bytes, item order, gold labels and release-local ids
+    do. Including release-local ids and order is deliberate: rotating ids or ordering defines a
+    distinct frozen release identity rather than silently reusing the old digest.
     """
 
     if not items:
@@ -121,10 +125,31 @@ def canonical_pairwise_items_digest(items: tuple[PairwiseItem, ...]) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def private_run_metadata_json(
+    *,
+    task_items_digest: str,
+    scorer_config_digest: str,
+    release_commitment: str,
+) -> str:
+    """Serialize private run anchors that must not be emitted in the public result."""
+
+    digests = {
+        "task_items_digest": task_items_digest,
+        "scorer_config_digest": scorer_config_digest,
+        "release_commitment": release_commitment,
+    }
+    for name, value in digests.items():
+        if not _SHA256_RE.fullmatch(value):
+            raise ValueError(f"{name} must be sha256:<64 lowercase hex characters>")
+    payload = {"record_type": "run_metadata", **digests}
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
 def pairwise_observation_json(observation: PairwiseObservation) -> str:
     """Serialize one observation without task text or candidate bytes."""
 
     payload = {
+        "record_type": "observation",
         "example_id": observation.example_id,
         "scorer_version": observation.scorer_version,
         "normalization_unit": observation.normalization_unit.value,
@@ -146,14 +171,24 @@ def write_pairwise_observations(
     path: Path,
     observations: tuple[PairwiseObservation, ...],
     *,
+    task_items_digest: str,
+    scorer_config_digest: str,
+    release_commitment: str,
     overwrite: bool = False,
 ) -> None:
-    """Write private per-example observations as deterministic JSONL."""
+    """Write private run metadata plus per-example observations as deterministic JSONL."""
 
     if not observations:
         raise ValueError("cannot write an empty observation set")
-    text = "\n".join(pairwise_observation_json(observation) for observation in observations) + "\n"
-    _write_text(path, text, overwrite=overwrite)
+    records = [
+        private_run_metadata_json(
+            task_items_digest=task_items_digest,
+            scorer_config_digest=scorer_config_digest,
+            release_commitment=release_commitment,
+        ),
+        *(pairwise_observation_json(observation) for observation in observations),
+    ]
+    _write_text(path, "\n".join(records) + "\n", overwrite=overwrite)
 
 
 def write_text(path: Path, text: str, *, overwrite: bool = False) -> None:
