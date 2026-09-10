@@ -86,6 +86,17 @@ def test_unit_normalization_preserves_rescoring_evidence() -> None:
     assert metrics["unit_normalized_tie_count"] == 1
 
 
+def test_scorer_config_digest_changes_when_tie_semantics_change() -> None:
+    same_label_different_semantics = PairwiseScoringPolicy(
+        version=TEST_POLICY.version,
+        normalization_unit=GenerationUnit.BYTE,
+        tie_epsilon_per_unit=1e-6,
+    )
+
+    assert TEST_POLICY.config_digest.startswith("sha256:")
+    assert same_label_different_semantics.config_digest != TEST_POLICY.config_digest
+
+
 def test_pairwise_item_rejects_invalid_gold_index() -> None:
     with pytest.raises(ValueError):
         PairwiseItem("bad", b"", (b"a", b"b"), 2)

@@ -12,6 +12,9 @@ license = { text = "MIT" }
 authors = [{ name = "benchmark-ladder contributors" }]
 dependencies = []
 
+[project.scripts]
+benchmark-ladder = "benchmark_ladder.cli:main"
+
 [project.optional-dependencies]
 dev = [
   "hypothesis==6.168.0",

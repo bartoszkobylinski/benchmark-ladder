@@ -14,7 +14,7 @@ from benchmark_ladder.adapters import DecodingConfig, DecodingMode, GenerationUn
 
 SCHEMA_VERSION = 1
 JsonScalar: TypeAlias = str | int | float | bool | None
-_RELEASE_COMMITMENT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class UnsupportedSchemaVersion(ValueError):
@@ -62,6 +62,7 @@ class EvaluationMetadata:
     calibration_rule_version: str | None = None
     reference_pool_id: str | None = None
     release_commitment: str | None = None
+    scorer_config_digest: str | None = None
 
     def __post_init__(self) -> None:
         required = {
@@ -81,10 +82,13 @@ class EvaluationMetadata:
         for optional_name, optional_value in optional.items():
             if optional_value is not None and not optional_value:
                 raise ValueError(f"{optional_name} must be non-empty when set")
-        if self.release_commitment is not None and not _RELEASE_COMMITMENT_RE.fullmatch(
-            self.release_commitment
-        ):
-            raise ValueError("release_commitment must be sha256:<64 lowercase hex characters>")
+        digests = {
+            "release_commitment": self.release_commitment,
+            "scorer_config_digest": self.scorer_config_digest,
+        }
+        for digest_name, digest_value in digests.items():
+            if digest_value is not None and not _SHA256_RE.fullmatch(digest_value):
+                raise ValueError(f"{digest_name} must be sha256:<64 lowercase hex characters>")
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +164,7 @@ class EvaluationResult:
                 "benchmark_id": self.evaluation.benchmark_id,
                 "benchmark_version": self.evaluation.benchmark_version,
                 "scorer_version": self.evaluation.scorer_version,
+                "scorer_config_digest": self.evaluation.scorer_config_digest,
                 "taxonomy_version": self.evaluation.taxonomy_version,
                 "runner_git_sha": self.evaluation.runner_git_sha,
                 "seed": self.evaluation.seed,
@@ -234,6 +239,7 @@ class EvaluationResult:
                 benchmark_id=_required_str(evaluation_data, "benchmark_id"),
                 benchmark_version=_required_str(evaluation_data, "benchmark_version"),
                 scorer_version=_required_str(evaluation_data, "scorer_version"),
+                scorer_config_digest=_optional_str(evaluation_data, "scorer_config_digest"),
                 taxonomy_version=_required_str(evaluation_data, "taxonomy_version"),
                 runner_git_sha=_required_str(evaluation_data, "runner_git_sha"),
                 seed=_optional_int(evaluation_data, "seed"),

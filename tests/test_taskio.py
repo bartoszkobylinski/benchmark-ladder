@@ -1,0 +1,198 @@
+import base64
+import json
+from pathlib import Path
+
+import pytest
+
+from benchmark_ladder.adapters import GenerationUnit
+from benchmark_ladder.runner import PairwiseItem, PairwiseObservation
+from benchmark_ladder.taskio import (
+    canonical_pairwise_items_digest,
+    load_pairwise_jsonl,
+    pairwise_observation_json,
+    write_pairwise_observations,
+)
+
+TASK_DIGEST = "sha256:" + ("a" * 64)
+SCORER_DIGEST = "sha256:" + ("b" * 64)
+RELEASE_COMMITMENT = "sha256:" + ("c" * 64)
+
+
+def _b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
+def test_load_pairwise_jsonl_preserves_exact_bytes(tmp_path: Path) -> None:
+    task_path = tmp_path / "task.jsonl"
+    task_path.write_text(
+        json.dumps(
+            {
+                "example_id": "one",
+                "context_b64": _b64(b"ctx\x00\xff"),
+                "candidates_b64": [_b64(b"a\n"), _b64(b"b\x00")],
+                "gold_index": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    items = load_pairwise_jsonl(task_path)
+
+    assert len(items) == 1
+    assert items[0].context == b"ctx\x00\xff"
+    assert items[0].candidates == (b"a\n", b"b\x00")
+    assert items[0].gold_index == 1
+
+
+def test_load_pairwise_jsonl_rejects_duplicate_ids_without_echoing_id(tmp_path: Path) -> None:
+    task_path = tmp_path / "task.jsonl"
+    row = {
+        "example_id": "private-descriptive-id",
+        "context_b64": _b64(b"ctx"),
+        "candidates_b64": [_b64(b"a"), _b64(b"b")],
+        "gold_index": 0,
+    }
+    task_path.write_text(json.dumps(row) + "\n" + json.dumps(row) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError) as exc_info:
+        load_pairwise_jsonl(task_path)
+
+    assert "duplicate example_id" in str(exc_info.value)
+    assert "private-descriptive-id" not in str(exc_info.value)
+    assert str(task_path) not in str(exc_info.value)
+
+
+def test_load_pairwise_jsonl_rejects_unknown_fields(tmp_path: Path) -> None:
+    task_path = tmp_path / "task.jsonl"
+    task_path.write_text(
+        json.dumps(
+            {
+                "example_id": "one",
+                "context_b64": _b64(b"ctx"),
+                "candidates_b64": [_b64(b"a"), _b64(b"b")],
+                "gold_index": 0,
+                "unexpected": "value",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="keys mismatch"):
+        load_pairwise_jsonl(task_path)
+
+
+def test_load_pairwise_jsonl_rejects_noncanonical_base64(tmp_path: Path) -> None:
+    task_path = tmp_path / "task.jsonl"
+    # YR== decodes to the same byte as canonical YQ== because of non-zero trailing pad bits.
+    row = {
+        "example_id": "one",
+        "context_b64": "YR==",
+        "candidates_b64": [_b64(b"a"), _b64(b"b")],
+        "gold_index": 0,
+    }
+    task_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="not canonical base64"):
+        load_pairwise_jsonl(task_path)
+
+
+def test_loader_does_not_split_on_unicode_line_separator(tmp_path: Path) -> None:
+    task_path = tmp_path / "task.jsonl"
+    row = {
+        "example_id": "line\u2028separator",
+        "context_b64": _b64(b"ctx"),
+        "candidates_b64": [_b64(b"a"), _b64(b"b")],
+        "gold_index": 0,
+    }
+    task_path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    items = load_pairwise_jsonl(task_path)
+
+    assert items[0].example_id == "line\u2028separator"
+
+
+def test_canonical_digest_ignores_source_json_formatting(tmp_path: Path) -> None:
+    compact = tmp_path / "compact.jsonl"
+    pretty_keys = tmp_path / "different-order.jsonl"
+    row_a = {
+        "example_id": "one",
+        "context_b64": _b64(b"ctx"),
+        "candidates_b64": [_b64(b"a"), _b64(b"b")],
+        "gold_index": 0,
+    }
+    row_b = {
+        "gold_index": 0,
+        "candidates_b64": [_b64(b"a"), _b64(b"b")],
+        "context_b64": _b64(b"ctx"),
+        "example_id": "one",
+    }
+    compact.write_text(json.dumps(row_a, separators=(",", ":")) + "\n", encoding="utf-8")
+    pretty_keys.write_text(json.dumps(row_b, indent=None) + "\r\n", encoding="utf-8")
+
+    items_a = load_pairwise_jsonl(compact)
+    items_b = load_pairwise_jsonl(pretty_keys)
+
+    assert items_a == items_b
+    assert canonical_pairwise_items_digest(items_a) == canonical_pairwise_items_digest(items_b)
+
+
+def test_canonical_digest_changes_when_evaluated_bytes_change() -> None:
+    items_a = (PairwiseItem("one", b"ctx", (b"a", b"b"), 0),)
+    items_b = (PairwiseItem("one", b"ctx", (b"a", b"c"), 0),)
+
+    assert canonical_pairwise_items_digest(items_a) != canonical_pairwise_items_digest(items_b)
+
+
+def test_canonical_digest_includes_release_local_id_and_order() -> None:
+    first = PairwiseItem("id-a", b"ctx", (b"a", b"b"), 0)
+    second = PairwiseItem("id-b", b"ctx", (b"c", b"d"), 1)
+
+    assert canonical_pairwise_items_digest((first,)) != canonical_pairwise_items_digest(
+        (PairwiseItem("id-c", b"ctx", (b"a", b"b"), 0),)
+    )
+    assert canonical_pairwise_items_digest((first, second)) != canonical_pairwise_items_digest(
+        (second, first)
+    )
+
+
+def test_observation_file_contains_private_run_metadata_without_task_bytes(tmp_path: Path) -> None:
+    observation = PairwiseObservation(
+        example_id="opaque-id",
+        scorer_version="pairwise-v1",
+        normalization_unit=GenerationUnit.BYTE,
+        candidate_logprobs=(-1.0, -2.0),
+        candidate_byte_lengths=(6, 6),
+        candidate_unit_counts=(6, 6),
+        gold_index=0,
+        margin=1.0,
+        tie_epsilon=6e-12,
+        correct=True,
+        unit_normalized_margin=1.0 / 6.0,
+        unit_normalized_tie_epsilon=1e-12,
+        unit_normalized_correct=True,
+    )
+
+    encoded = pairwise_observation_json(observation)
+    assert "context" not in encoded
+    assert "candidate" in encoded
+    assert "secret candidate" not in encoded
+
+    output = tmp_path / "observations.jsonl"
+    write_pairwise_observations(
+        output,
+        (observation,),
+        task_items_digest=TASK_DIGEST,
+        scorer_config_digest=SCORER_DIGEST,
+        release_commitment=RELEASE_COMMITMENT,
+    )
+    records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert records[0] == {
+        "record_type": "run_metadata",
+        "release_commitment": RELEASE_COMMITMENT,
+        "scorer_config_digest": SCORER_DIGEST,
+        "task_items_digest": TASK_DIGEST,
+    }
+    assert records[1]["record_type"] == "observation"
+    assert records[1]["example_id"] == "opaque-id"

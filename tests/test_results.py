@@ -17,6 +17,7 @@ from benchmark_ladder.results import (
 from benchmark_ladder.scoring import ExactMatchPolicy
 
 COMMITMENT = "sha256:" + ("a" * 64)
+SCORER_CONFIG_DIGEST = "sha256:" + ("b" * 64)
 
 
 def make_result() -> EvaluationResult:
@@ -27,6 +28,7 @@ def make_result() -> EvaluationResult:
             benchmark_id="toy-public-task",
             benchmark_version="0-test",
             scorer_version="1",
+            scorer_config_digest=SCORER_CONFIG_DIGEST,
             taxonomy_version="1",
             runner_git_sha="deadbeef",
             seed=None,
@@ -53,7 +55,10 @@ def test_result_round_trip_and_canonical_json() -> None:
     payload = result.to_dict()
     assert EvaluationResult.from_dict(payload) == result
     assert result.canonical_json() == EvaluationResult.from_dict(payload).canonical_json()
-    assert json.loads(result.canonical_json())["evaluation"]["release_commitment"] == COMMITMENT
+    evaluation = json.loads(result.canonical_json())["evaluation"]
+    assert evaluation["release_commitment"] == COMMITMENT
+    assert evaluation["scorer_config_digest"] == SCORER_CONFIG_DIGEST
+    assert "task_items_digest" not in evaluation
 
 
 def test_component_builder_binds_versions_to_objects() -> None:
