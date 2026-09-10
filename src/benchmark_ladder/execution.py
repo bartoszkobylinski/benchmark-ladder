@@ -20,7 +20,6 @@ from benchmark_ladder.runner import (
     aggregate_pairwise,
     evaluate_pairwise,
 )
-from benchmark_ladder.taskio import canonical_pairwise_items_digest
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +44,6 @@ def run_pairwise_evaluation(
 ) -> tuple[EvaluationResult, tuple[PairwiseObservation, ...]]:
     """Run inference, aggregate metrics, and bind them to public provenance."""
 
-    task_items_digest = canonical_pairwise_items_digest(request.items)
     observations = evaluate_pairwise(
         request.adapter,
         request.items,
@@ -60,7 +58,6 @@ def run_pairwise_evaluation(
         runner_git_sha=request.runner_git_sha,
         reference_pool_id=request.reference_pool_id,
         release_commitment=request.release_commitment,
-        task_items_digest=task_items_digest,
         scorer_config_digest=request.scoring_policy.config_digest,
     )
     result = EvaluationResult(
